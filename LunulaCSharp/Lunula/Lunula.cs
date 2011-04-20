@@ -14,7 +14,6 @@ using System.IO;
 using System.Diagnostics;
 using System.Linq;
 
-
 namespace Lunula {
     public class Void {
         Void() { }
@@ -274,6 +273,7 @@ namespace Lunula {
             vm.DefineFunction("@type-data", type => ((TaggedType)type).Data);
             vm.DefineFunction("@type-data-set!", (type, data) => { ((TaggedType)type).Data = data; return Void.TheVoidValue; });
             vm.DefineFunction("call/cc", _vm.CallWithCurrentContinuation);
+            vm.DefineFunction("@exit", x => Void.TheVoidValue);
         }
 
         static object MakeVector(object list) {
@@ -587,7 +587,8 @@ namespace Lunula {
 
         static object StringToNumber(object obj) {
             var str = (string)obj;
-            if (!Char.IsDigit(str[0])) return false;
+            if (str.Any(x => !Char.IsDigit(x) && x != '.' && x != '-')) return false;
+            if (str.Length == 1 && str == "-") return false;
             try {
                 return double.Parse(str);
             } catch (FormatException) {
@@ -800,7 +801,7 @@ namespace Lunula {
             }
         }
 
-        bool _finished = false;
+        bool _finished;
         void Return() {
             if (CONT != null) {
                 ENVT = CONT.ENVT;
@@ -876,7 +877,7 @@ namespace Lunula {
                             }
                             break;
                         case Instruction.OpCodes.BindVarArgs: {
-                                int numOfBindings = (int)i.AX;
+                                var numOfBindings = (int)i.AX;
                                 ENVT = new LexicalEnvironment(ENVT, numOfBindings);
 
                                 // parameters are reversed on EVAL stack
@@ -944,7 +945,7 @@ namespace Lunula {
                             }
                             break;
                         case Instruction.OpCodes.LocalSet: {
-                                LexicalEnvironment envt = ENVT;
+                                var envt = ENVT;
                                 for (int x = 0; x < i.A; x++)
                                     envt = envt.Parent;
                                 envt.Bindings[i.B] = VALUE;
@@ -1039,7 +1040,7 @@ namespace Lunula {
                 }
             }
 
-            for (int x = 0; x < numberOfInstructions; x++) {
+            for (var x = 0; x < numberOfInstructions; x++) {
                 instructions[x] = new Instruction(br.ReadUInt32());
             }
 
