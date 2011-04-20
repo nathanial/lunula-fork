@@ -1,0 +1,560 @@
+;; .. -*- mode: scheme -*-
+;;
+;; Lunula - A portable Lisp
+;;
+;; Copyright (c) Anthony Fairchild
+;;
+;; This software is subject to the Microsoft Public License
+;; (Ms-PL). See LICENSE.txt for details.
+;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; COMPILER ENVIRONMENT ;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define (compiler-env-extend env)
+  (cons '() env))
+
+(define (compiler-env-lookup lenv name)  
+  (define (lookup env frame)
+    (cond ((null? env) #f)
+          ((null? (car env)) (lookup (cdr env) (+ frame 1)))
+          (else (let ((pos (position name (car env) car)))
+                  (cond (pos (cons frame pos))
+                        (else (lookup (cdr env) (+ frame 1))))))))
+  (assert (symbol? name))
+  (lookup lenv 0))
+
+(define (compiler-env-define env name)
+  (assert (symbol? name))
+  ;; if env is null we must be at the toplevel environment, so do nothing
+  (unless (null? env)
+          (let ((binding (assoc name (car env))))
+            (unless binding
+                    (set-car! env (append (car env) (list (cons name 'nothing))))))))
+
+(define (compiler-env-bind-lambda-list env params)
+  (cond ((null? params) (void))
+        ((symbol? params)
+         (compiler-env-define env params))
+        (else (compiler-env-define env (car params))
+              (compiler-env-bind-lambda-list env (cdr params)))))
+
+;;;;;;;;;;;;;;;;;;
+;;;; TEMPLATE ;;;;
+;;;;;;;;;;;;;;;;;;
+
+(define (make-template)
+  '(template ()()))
+
+(define (template? thing)
+  (and (cons? thing)
+       (eq? 'template (car thing))))
+
+(define (template-literals template)
+  (cadr template))
+
+(define (template-code template)
+  (reverse (caddr template)))
+
+(define (template-add-literal template literal)
+  (let ((pos (position literal (cadr template))))
+    (cond (pos pos)
+          (else
+           (set-car! (cdr template) (append (cadr template) (list literal)))
+           (- (length (cadr template)) 1)))))
+
+(define (template-add-code template instruction)
+  (set-car! (cddr template) (cons instruction (caddr template)))
+  template)
+
+(define (compile-template-to-byte-code template out)
+  (define (make-instruction instruction)
+    (define *opcode-indexes* 
+      '((save-continuation . 0)
+        (fetch-literal     . 1)
+        (push              . 2)
+        (apply             . 3)
+        (bind              . 4)
+        (make-closure      . 5)
+        (toplevel-get      . 6)
+        (toplevel-set      . 7)
+        (local-get         . 8)
+        (local-set         . 9)
+        (return            . 10)
+        (end               . 11)
+        (jmp               . 12)
+        (jmp-if-false      . 13)
+        (bind-varargs      . 14)))
+
+    (define (op-a-b op a b)
+      (@bor (@bor (@left-shift b 19) 
+                  (@left-shift a 6))
+            op))
+
+    (define (op-ax op ax)
+      (@bor (@left-shift ax 6)
+            op))
+    (let ((opcode (car instruction))
+          (opcode-index (cdr (assoc (car instruction) *opcode-indexes*))))
+      (cond ( ;; (OP A B)
+             (or (eq? opcode 'local-get)
+                 (eq? opcode 'local-set))
+             (op-a-b opcode-index 
+                     (cadr instruction) 
+                     (caddr instruction)))
+            ;; (OP)
+            ((or (eq? opcode 'push)
+                 (eq? opcode 'apply)
+                 (eq? opcode 'make-closure)
+                 (eq? opcode 'toplevel-get)
+                 (eq? opcode 'toplevel-set)               
+                 (eq? opcode 'return)
+                 (eq? opcode 'end))
+             opcode-index)
+            ;; (OP AX)
+            ((or (eq? opcode 'save-continuation)
+                 (eq? opcode 'bind)
+                 (eq? opcode 'bind-varargs)
+                 (eq? opcode 'jmp)
+                 (eq? opcode 'jmp-if-false)
+                 (eq? opcode 'fetch-literal))
+             (op-ax opcode-index
+                    (cadr instruction)))
+            (else
+             (error 'make-instruction "invalid op code")))))
+  (define (write-bin-string str)
+    (@write-word (length str) out)
+    (for-each (lambda (c)
+                (@write-word (@char-code c) out))
+              (string->list str)))
+
+  (define (compile-labels-to-addresses code-form)
+    (let ((labels '())
+          (index 0)
+          (instructions '()))
+      (for-each (lambda (code)                 
+                  (when (symbol? code)
+                        (set! labels (cons (cons code index) labels))
+                        (set! index (- index 1)))
+                  (set! index (+ index 1)))                                    
+                code-form)
+      (set! index 0)
+      (for-each (lambda (code)                
+                  (cond ((symbol? code)
+                         (set! index (- index 1)))
+                        ((or (eq? 'save-continuation (car code))
+                             (eq? 'jmp-if-false (car code))
+                             (eq? 'jmp (car code)))
+                         (set! instructions 
+                               (cons (list 
+                                      (car code)
+                                      (cdr (assoc (cadr code) labels)))
+                                     instructions)))
+                        (else 
+                         (set! instructions 
+                               (cons (apply list
+                                            (car code)
+                                            (cdr code))
+                                     instructions))))
+                  (set! index (+ index 1)))
+                code-form)
+      (reverse instructions)))
+
+  (let ((literals (template-literals template))
+        (code (compile-labels-to-addresses (template-code template))))
+    ;; write version
+    (@write-dword 3 out)
+    (@write-dword (length literals) out)
+    (@write-dword (length code) out)
+    (for-each (lambda (literal)
+                (cond ((symbol? literal) 
+                       (@write-byte 1 out)
+                       (write-bin-string (symbol->string literal)))
+                      ((string? literal) 
+                       (@write-byte 2 out)
+                       (write-bin-string literal))
+                      ((number? literal) 
+                       (@write-byte 3 out)
+                       (write-bin-string (number->string literal)))
+                      ((boolean? literal) 
+                       (@write-byte 4 out)
+                       (@write-byte (if literal 1 0) out))
+                      ((null? literal) 
+                       (@write-byte 5 out))
+                      ((char? literal) 
+                       (@write-byte 6 out)
+                       (@write-word (@char-code literal) out))
+                      ((template? literal)
+                       (@write-byte 10 out)
+                       (compile-template-to-byte-code literal out))
+                      (else
+                       (error 'compile-template-to-byte-code "Invalid literal ~A" literal))))
+              literals)
+    (for-each (lambda (instruction)
+                (@write-dword (make-instruction instruction) out))
+              code)))
+                      
+;; converts a symbolic template form to a binary representation
+;; suitable for the virtual machine to run
+(define (compile-template-to-binary-stream template-form out)
+  (for-each (lambda (c) 
+              (@write-word (@char-code c) out))
+            (string->list "LUNULA"))
+  (@write-word 1 out)
+  (compile-template-to-byte-code template-form out))
+
+(define (compile-template-to-byte-array template-form)  
+  (let ((out (@open-output-byte-array)))
+    (compile-template-to-binary-stream template-form out)
+    (@get-output-byte-array out)))
+
+
+(define (run-template template-form)
+  (@run-template (compile-template-to-byte-array template-form)))
+
+;;;;;;;;;;;;;;;;;;
+;;;; COMPILER ;;;;
+;;;;;;;;;;;;;;;;;;
+
+(define next-label-num 0)
+
+(define (make-label str)
+  (set! next-label-num (+ 1 next-label-num))
+  (string->symbol (string-append str "-" (number->string next-label-num))))
+
+(define (self-evaluating? form)
+  (or (number? form)
+      (string? form)
+      (boolean? form)
+      (char? form)))
+
+(define (expand-quasiquote x)
+  (if (cons? x)
+      (if (eq? (car x) 'unquote)
+          (cadr x)
+          (if (eq? (car x) 'unquote-splicing)
+              (error 'expand-quasiquote "unquote-splicing not inside list")
+              (if (and (cons? (car x)) (eq? (caar x) 'unquote-splicing))
+                  (list 'append
+                        (cadar x)
+                        (expand-quasiquote (cdr x)))
+                  (list 'cons
+                        (expand-quasiquote (car x))
+                        (expand-quasiquote (cdr x))))))
+      (list 'quote x)))
+
+
+(define (toplevel-defined? name)
+  (assert (symbol? name))
+  (@toplevel-defined? name))
+
+(define (lookup-toplevel name)
+  (assert (symbol? name))
+  (if (toplevel-defined? name)
+      (@toplevel-lookup name)
+      (error 'lookup-toplevel "~A is undefined" name)))
+
+(define (define-toplevel name value)  
+  (@toplevel-define name value))
+
+
+(define (vm-compile-body body template env tail-pos?)
+  (cond ((null? body) (template-add-code template '(return)))
+        ((null? (cdr body))
+         (vm-compile-form (car body) template env tail-pos?))
+        (else
+         (vm-compile-form (car body) template env #f)
+         (vm-compile-body (cdr body) template env tail-pos?))))
+
+(define (vm-compile-lambda form template env tail-pos?)
+  (define (vararg-lambda-list? lst)
+    (cond ((null? lst)       #f)
+          ((symbol? lst)     #t)
+          ((null? (cdr lst)) #f)
+          ((cons? (cdr lst)) (vararg-lambda-list? (cdr lst)))
+          (else              #t)))
+
+  ;; gets the defines at the top of a lambda body
+  (define (lambda-defines body)    
+    (cond ((null? body) '())
+          ((and (cons? body)
+                (cons? (car body))
+                (eq? 'define (caar body)))
+           (cons (car body)
+                 (lambda-defines (cdr body))))
+          (else '())))
+
+  ;; gets the body of a lambda without the defines
+  (define (lambda-body-sans-defines body)
+    (cond ((null? body) '())
+          ((and (cons? body)
+                (cons? (car body))
+                (eq? 'define (caar body)))
+           (lambda-body-sans-defines (cdr body)))
+          (else body)))
+
+  (define (min-num-of-params params)
+    (cond ((or (null? params)
+               (symbol? params)) 0)
+          ((and (cons? params) 
+                (symbol? (cdr params))) 1)
+          ((cons? params) (+ 1 (min-num-of-params (cdr params))))
+          (else (error 'min-num-of-params "parameter must be a symbol"))))
+  (let* ((params (cadr form))
+         (body (cddr form))
+         (defines (map normalize-define (lambda-defines body)))
+         (body-sans-defines (lambda-body-sans-defines body))
+         (new-template (make-template)))
+    ;; compile the parameters
+    (unless (null? params)
+            (set! env (compiler-env-extend env))
+            (template-add-code new-template (if (vararg-lambda-list? params)
+                                                `(bind-varargs ,(+ 1 (min-num-of-params params)))
+                                                `(bind ,(min-num-of-params params)))))
+    (compiler-env-bind-lambda-list env params)
+    
+    ;; compile the defines which are at the top
+    ;; of the lambda
+    (for-each (lambda (def)
+                (let ((name (second def))
+                      (docstring (third def))
+                      (value (fourth def)))
+                  (set! env (compiler-env-extend env))
+                  (compiler-env-define env name)
+                  (template-add-code new-template
+                                     `(fetch-literal ,(template-add-literal new-template '())))
+                  (template-add-code new-template '(push))
+                  (template-add-code new-template '(bind 1))
+                  (vm-compile-form value new-template env #f)
+                  (let ((index (compiler-env-lookup env name)))
+                    (assert index)
+                    (template-add-code new-template `(local-set ,(car index) ,(cdr index))))))
+              defines)
+
+    ;; compile the body
+    (vm-compile-body body-sans-defines new-template env #t)
+    (vm-compile-self-evaluating new-template template #f)
+    (template-add-code template '(make-closure)))
+  (when tail-pos?
+        (template-add-code template '(return))))
+
+(define (vm-compile-self-evaluating form template tail-pos?)
+  (template-add-code template
+               `(fetch-literal ,(template-add-literal template form)))
+  (when tail-pos?
+          (template-add-code template '(return))))
+
+(define (vm-compile-lookup form template env tail-pos?)
+  (let ((index (compiler-env-lookup env form)))
+    (cond (index
+           (template-add-code template `(local-get ,(car index) ,(cdr index))))
+          (else
+           (template-add-code template `(fetch-literal ,(template-add-literal template form)))
+           (template-add-code template '(toplevel-get)))))
+  (when tail-pos?
+          (template-add-code template '(return))))
+
+(define (vm-compile-call form template env tail-pos?)
+  (define (push-args args)
+    (cond ((null? args) (void))
+          (else 
+           (vm-compile-form (car args) template env #f)
+           (template-add-code template '(push))
+           (push-args (cdr args)))))
+
+  (define (emit-call func args)
+    (push-args args)
+    (vm-compile-form func template env #f)
+    (template-add-code template '(apply)))
+
+  (let ((args (cdr form))
+        (func (car form)))
+    (cond (tail-pos?          
+           (emit-call func args))
+          (else 
+           (let ((label (make-label "call")))
+             (template-add-code template `(save-continuation ,label))
+             (emit-call func args)
+             (template-add-code template label))))))
+
+(define (vm-compile-if form template env tail-pos?)
+  (let ((condition (cadr form))
+        (then-form (caddr form))
+        (else-form (if (null? (cdddr form)) #f (cadddr form)))
+        (else-label (make-label "else"))
+        (end-label (make-label "end")))
+    (vm-compile-form condition template env #f)
+    (template-add-code template `(jmp-if-false ,else-label))
+    (vm-compile-form then-form template env tail-pos?)
+    (template-add-code template `(jmp ,end-label))
+    (template-add-code template else-label)
+    (vm-compile-form else-form template env tail-pos?)
+    (template-add-code template end-label)))
+
+;;(define something [docstring] value)
+;;(define (somefun x y) [docstring] body) ==> (define somefun [docstring] (lambda (x y) body))
+
+(define (normalize-define form)
+;;   "(normalized-define form)
+;;   form - a define form
+;; This function takes a define form and converts it to the form:
+;;   (define symbol docstring value)
+;; Example conversions:
+;;   (define something value) => (define something \"\" value)
+;;   (define something \"my docstring\" value) => (define something \"my docstring\" value)
+;;   (define (somefun x y) [docstring] body) ==> (define somefun [docstring] (lambda (x y) body))" 
+  (cond ((symbol? (cadr form)) 
+         (cond ((= 4 (length form))
+                ;; the third thing must be a string
+                (unless (string? (third form))
+                        (error 'define "Invalid docstring specified for define ~S" form))
+                form)
+               (else
+                `(define ,(second form) "" ,(third form)))))
+        (else
+         (cond ((string? (third form))
+                `(define ,(caadr form) ,(third form) (lambda ,(cdadr form) ,@(cdddr form))))
+               (else
+                `(define ,(caadr form) "" (lambda ,(cdadr form) ,@(cddr form))))))))
+
+(define (emit-toplevel-set! template env symbol value)  
+  (vm-compile-form value template env #f)
+  (template-add-code template '(push))
+  (vm-compile-self-evaluating symbol template #f)
+  (template-add-code template '(toplevel-set)))
+
+(define (vm-compile-toplevel-define form template env tail-pos?)
+  (let* ((form (normalize-define form))
+         (symbol (second form))
+         (docstring (third form))
+         (value (fourth form)))
+    (unless (string=? "" docstring)
+            (vm-compile-form `(set-docstring! ',symbol ,docstring) template env #f))
+    (emit-toplevel-set! template env symbol value))
+  (when tail-pos?
+        (template-add-code template '(return))))
+
+
+(define (vm-compile-begin form template env tail-pos?)  
+  (cond ((null? (cdr form))
+         ;; do nothing, basically call (void)
+         (template-add-code template `(fetch-literal ,(template-add-literal template 'void)))
+         (template-add-code template '(toplevel-get))
+         (template-add-code template '(apply)))
+        (else
+         (vm-compile-body (cdr form) template env tail-pos?))))
+
+(define (vm-compile-set! form template env tail-pos?)
+  (let ((symbol (cadr form))
+        (value (caddr form)))
+    (let ((index (compiler-env-lookup env symbol)))
+      (cond (index
+             ;; local set
+             (vm-compile-form value template env #f)
+             (template-add-code template `(local-set ,(car index) ,(cdr index))))
+            (else
+             ;; toplevel set
+             (emit-toplevel-set! template env symbol value)))))
+  (when tail-pos?
+        (template-add-code template '(return))))
+
+(define (vm-compile-quote form template env tail-pos?)
+  (let ((thing (cadr form)))
+    (if (cons? thing)
+      (vm-compile-form `(cons ',(car thing) ',(cdr thing)) template env tail-pos?)
+      (vm-compile-self-evaluating thing template tail-pos?))))
+
+(define (vm-compile-eval-when form template env tail-pos?)
+  (let ((conditions (cadr form))
+        (body (cddr form)))
+    (when (and (null? env) ;;toplevel
+               (member ':compile-toplevel conditions))
+          (eval (cons 'begin body)))
+
+    (when (member ':execute conditions)
+          (vm-compile-form (cons 'begin body) template env tail-pos?))))
+
+(define (vm-compile-form form template env tail-pos?)
+  (cond ((self-evaluating? form) (vm-compile-self-evaluating form template tail-pos?))
+        ((symbol? form)          (vm-compile-lookup form template env tail-pos?))
+        (else 
+         (let ((car-form (car form)))
+           (cond            
+            ((eq? 'define car-form)    (cond ((null? env)
+                                              (vm-compile-toplevel-define form template env tail-pos?))
+                                             (else (error "define is not allowed as an expression"))))
+            ((eq? 'lambda car-form)    (vm-compile-lambda form template env tail-pos?))
+            ((eq? 'if car-form)        (vm-compile-if form template env tail-pos?))
+            ((eq? 'begin car-form)     (vm-compile-begin form template env tail-pos?))
+            ((eq? 'quote car-form)     (vm-compile-quote form template env tail-pos?))
+            ((eq? 'set! car-form)      (vm-compile-set! form template env tail-pos?))
+            ((eq? 'eval-when car-form) (vm-compile-eval-when form template env tail-pos?))
+            ((and (symbol? car-form)
+                  (toplevel-defined? car-form)
+                  (macro-function? 
+                   (lookup-toplevel car-form)))
+             (vm-compile-form (macroexpand-1 form env) template env tail-pos?))
+            (else    
+             (vm-compile-call form template env tail-pos?))))))
+  template)
+
+(define (vm-compile form)
+  ;; compiles form into a template
+  (let ((template (make-template)))
+    (vm-compile-form form template '() #t)
+    template))
+
+(define (vm-compile-file input-file)
+  (let* ((lvm-file (change-file-extension input-file "lvm"))
+         (out-port (@open-binary-file-output-port lvm-file))
+         (form (read-from-file input-file)))
+    (compile-template-to-binary-stream (vm-compile form)
+                                       out-port)
+    (close-output-port out-port)
+    lvm-file))
+
+(define (vm-eval form)
+  (run-template (vm-compile form)))
+
+(define eval vm-eval)
+
+(define (change-file-extension file-name ext)
+  (string-append (pathname-directory file-name)
+                 (pathname-filename file-name)
+                 "." 
+                 ext))
+
+(define compile-file vm-compile-file)
+
+(define (load input-file)
+  (let ((extension (pathname-extension input-file)))
+    (cond ((null? extension) 
+           ;; eval the .lun file if the user was not specific
+           ;; TODO: run the most recent of .lun or .dll
+           (eval (read-from-file (string-append input-file ".lun"))))
+          ((string=? extension "lun")
+           (eval (read-from-file input-file)))
+          ((string=? extension "lvm")
+           (@load-lvm-file input-file))
+          (else (error 'load "Don't know how to load ~A" input-file)))))
+
+(define (repl)
+  (define (loop)
+    (handle-error 
+     (lambda () 
+       (newline (current-error-port))
+       (display "> " (current-error-port))
+       (let ((form (read)))
+         (if (eof-object? form)
+             (quit)
+             (print (eval form) (current-error-port))))
+       (newline (current-error-port))
+       (loop))
+     (lambda (msg) 
+       (display (format "ERROR: ~A" msg) (current-error-port))
+       (newline (current-error-port))
+       (loop))))
+  (display "Lunula 0.4.0" (current-error-port))(newline (current-error-port))
+  (display "type (quit) to exit" (current-error-port))(newline (current-error-port))
+  (loop))

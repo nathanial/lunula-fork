@@ -1,0 +1,17 @@
+;; .. -*- mode: scheme -*-
+;;
+;; Lunula
+;;
+;; A self-applicable Scheme to C# compiler
+;;
+;; Copyright (c) Anthony Fairchild
+;;
+;; This software is subject to the Microsoft Public License
+;; (Ms-PL). See LICENSE.txt for details.
+;;
+
+(begin 
+  (display "Eval-ing Unit Tests..." (current-error-port))
+  (newline (current-error-port))
+  (include "../test/test.lun")
+  (quit))

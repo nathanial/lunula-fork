@@ -1,0 +1,45 @@
+;; .. -*- mode: scheme -*-
+;;
+;; Lunula - A portable Lisp
+;;
+;; Copyright (c) Anthony Fairchild
+;;
+;; This software is subject to the Microsoft Public License
+;; (Ms-PL). See LICENSE.txt for details.
+;;
+
+(define (make-macro macro-fun)
+  (cons '__macro-function__ macro-fun))
+
+(define (macro-function? thing)
+  (and (cons? thing)
+       (eq? '__macro-function__ (car thing))
+       (procedure? (cdr thing))))
+
+(define (macroexpand-1 form . env)  
+  (let ((env (if (cons? env) (car env) '()))
+        (macro (lookup-toplevel (car form))))
+    (cond ((and (cons? form)
+                (macro-function? macro))
+           (apply (cdr macro) form env '()))
+          (else form))))
+
+;;TODO: make this into a destructuring bind
+(define (param-bindings args-def base)
+  (cond ((null? args-def) '())
+        ((symbol? args-def) (list (list args-def base)))
+        ((cons? args-def) (cons (list (car args-def)(list 'car base))
+                                (param-bindings (cdr args-def)(list 'cdr base))))))
+
+(define defmacro
+  (make-macro 
+   (lambda (form env)     
+     (let ((name (cadr form))
+           (args (caddr form))
+           (body (cdddr form)))
+       `(define ,name (make-macro 
+                       (lambda (form env)
+                         (let (,@(param-bindings args '(cdr form)))
+                           ,@body))))))))
+
+

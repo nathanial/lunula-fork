@@ -1,0 +1,95 @@
+;; .. -*- mode: scheme -*-
+;;
+;; Lunula - A portable Lisp
+;;
+;; Copyright (c) Anthony Fairchild
+;;
+;; This software is subject to the Microsoft Public License
+;; (Ms-PL). See LICENSE.txt for details.
+;;
+
+(defmacro assert (form)
+  (let ((condition (gensym)))
+    `(let ((,condition ,form))
+       (unless ,condition
+               (error 'assert "ASSERT FAILED: ~A != ~A" ,condition ',form)))))
+
+(defmacro time (form)
+  (let ((now (gensym))
+        (result (gensym)))
+    `(begin  
+       (trace "Timing ~S" ',form)
+       (let ((,now (@get-time))
+             (,result ,form))
+         (trace "Milliseconds elapsed: ~A" (@time-difference (@get-time) ,now))))))
+
+(defmacro cond clauses
+  (cond ((null? clauses) (void))
+        ((eq? 'else (caar clauses))
+         (if (null? (cdr clauses))
+             `(begin ,@(cdar clauses))
+             (error 'cond "else is not the last clause in cond")))
+        ((null? (cdr clauses))
+         `(if ,(caar clauses) 
+              (begin ,@(cdar clauses))))
+        (else 
+         `(if ,(caar clauses)
+              (begin ,@(cdar clauses))
+              (cond ,@(cdr clauses))))))
+
+(defmacro let (clauses . body)
+  `((lambda ,(map car clauses)
+      ,@body)
+    ,@(map cadr clauses)))
+           
+(defmacro let* (clauses . body)
+  (if (null? clauses)
+      `(begin ,@body)
+      `(let ((,(caar clauses) ,(cadar clauses)))
+         (let* ,(cdr clauses) ,@body))))
+
+(defmacro when (condition . body)
+  `(if ,condition 
+       (begin ,@body)))
+
+(defmacro unless (condition . body)
+  `(if (not ,condition)
+       (begin ,@body)))
+
+(defmacro or clauses
+  (if (null? clauses)
+      #f
+      (let ((a (gensym))(b (gensym)))
+        `(let ((,a ,(car clauses)))
+           (if ,a ,a (or ,@(cdr clauses)))))))
+
+(defmacro and clauses
+  (if (null? clauses)
+      '#t
+      (let ((a (gensym))(b (gensym)))
+        `(let ((,a ,(car clauses)))
+           (if ,a (and ,@(cdr clauses)) ,a)))))
+
+(defmacro quasiquote (form)
+  (expand-quasiquote form))
+
+(defmacro include (file)
+  (read-from-file file))
+
+;; a handy debugging macro
+;; prints varable names and their values
+;; first parameter can be a string, which gets printed
+;; example:  (print-vars "my-fun" a b c) 
+(defmacro print-vars args
+  (let ((prefix "")
+        (vars args))
+    (when (string? (car args))
+          (set! prefix (car args))
+          (set! vars (cdr args)))
+    `(trace (string-append 
+             ,prefix " "
+             ,(apply string-append 
+                     (map (lambda (x) 
+                            (string-append (format "~A" x) "=~A "))
+                          vars)))
+            ,@vars)))

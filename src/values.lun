@@ -1,0 +1,23 @@
+;; .. -*- mode: scheme -*-
+;;
+;; Lunula - A portable Lisp
+;;
+;; Copyright (c) Anthony Fairchild
+;;
+;; This software is subject to the Microsoft Public License
+;; (Ms-PL). See LICENSE.txt for details.
+;;
+
+(define (values . args)
+  (cons 'values args))
+
+(define (values? x)
+  (and (cons? x)
+       (eq? 'values (car x))))
+
+(define (call-with-one-value fun args)
+  (let ((retval (apply fun args)))
+    (if (values? retval)
+        (cadr retval)
+        retval)))
+

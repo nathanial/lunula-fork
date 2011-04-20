@@ -1,0 +1,147 @@
+;; .. -*- mode: scheme -*-
+;;
+;; Lunula - A portable Lisp
+;;
+;; Copyright (c) Anthony Fairchild
+;;
+;; This software is subject to the Microsoft Public License
+;; (Ms-PL). See LICENSE.txt for details.
+;;
+
+(define (write-char c . args)
+  (let ((port (arg-ref args 0 (current-output-port))))
+    (@write-char c port)))
+
+(define (write-readable-char c . args)
+  (let* ((port (arg-ref args 0 (current-output-port))))
+    (cond ((eq? c #\newline) (display-string "#\\newline" port))
+          ((eq? c #\tab) (display-string "#\\tab" port))
+          ((eq? c #\space) (display-string "#\\space" port))
+          ((eq? c #\return) (display-string "#\\return" port))
+          ((eq? c #\linefeed) (display-string "#\\linefeed" port))
+          (else (display-string "#\\" port)(write-char c port)))))
+
+(define (display-string s . args)
+  (let ((port (arg-ref args 0 (current-output-port))))
+    (@write-string s port)))
+
+(define (write-string s . args)
+  (let ((port (arg-ref args 0 (current-output-port))))
+    (write-char #\" port)
+    (for-each (lambda (c) 
+                (cond ((char=? c #\newline) (write-char #\\ port)(write-char #\n port))
+                      ((char=? c #\tab) (write-char #\\ port)(write-char #\t port))
+                      ((char=? c #\linefeed) (write-char #\\ port)(write-char #\r port))
+                      ((char=? c #\return) (write-char #\\ port)(write-char #\r port))
+                      ((char=? c #\\) (write-char #\\ port)(write-char #\\ port))
+                      ((char=? c #\") (write-char #\\ port)(write-char #\" port))
+                      (else (write-char c port))))
+              (string->list s))
+    (write-char #\" port)))
+
+(define (flush-output . args) 
+  (let ((port (arg-ref args 0 (current-output-port))))
+    (@flush-output port)))
+
+(define (write-number n port) (display-string (number->string n) port))
+(define (write-symbol s port) (display-string (symbol->string s) port))
+
+(define (write-list-helper c port item-writer)
+  (define (print-items c)
+    (cond ((cons? c) (item-writer (car c) port)
+           (unless (null? (cdr c)) (display " " port))
+           (print-items (cdr c)))
+          ((null? c) (display "" port))
+          (else (display ". " port)
+                (item-writer c port))))
+  (display "(" port)
+  (print-items c)
+  (display ")" port))
+
+(define (write-list c port) (write-list-helper c port write))
+(define (display-list c port) (write-list-helper c port display))
+
+(define (newline . args)
+  (let ((port (arg-ref args 0 (current-output-port))))
+    (display-string "\n" port)))
+
+(define (write thing . args)         
+  (let ((port (arg-ref args 0 (current-output-port))))
+    (cond ((cons? thing)     (write-list thing port))
+          ((null? thing)     (display "()" port))
+          ((void? thing)     (display "" port)(newline))
+          ((char? thing)     (write-readable-char thing port))
+          ((symbol? thing)   (write-symbol thing port))
+          ((string? thing)   (write-string thing port))
+          ((number? thing)   (write-number thing port))
+          ((procedure? thing)(display (format "#<Function>") port))
+          ((eq? thing #t)    (display "#t" port))
+          ((eq? thing #f)    (display "#f" port))
+          (else              (display (string-append "#<Unknown "
+                                                     (@to-string thing)
+                                                     ">")
+                                      port)))))
+
+(define print write)
+
+(define (display thing . args)
+  (let ((port (arg-ref args 0 (current-output-port))))
+    (cond ((string? thing) (display-string thing port))
+          ((cons? thing) (display-list thing port))
+          ((char? thing) (write-char thing port))
+          (else (write thing port)))))
+
+(define (printf format-string . args)
+  (display (apply format format-string args)))
+
+(define (print-to-string thing)
+      (let ((port (open-output-string)))
+        (print thing port)
+        (get-output-string port)))
+
+(define (display-to-string thing)
+  (let ((port (open-output-string)))
+    (display thing port)
+    (get-output-string port)))
+
+(define (format format-string . objects)  
+  (let ((buffer (open-output-string)))
+    (define (loop format-list objects)
+      (cond ((null? format-list) (get-output-string buffer))
+            ((char=? (car format-list) #\~)
+             (if (null? (cdr format-list))
+                 (error 'format "Incomplete escape sequence")
+                 (let ((format-char (cadr format-list)))
+                   (cond  
+                    ((or (eq? format-char #\a)(eq? format-char #\A))
+                     (if (null? objects)
+                         (error 'format (string-append "No value for escape sequence "
+                                                       (list->string (list format-char))))
+                         (begin
+                           (display (car objects) buffer)
+                           (loop (cddr format-list) (cdr objects)))))
+                    ((or (eq? format-char #\s)(eq? format-char #\S))
+                     (if (null? objects)
+                         (error 'format (string-append "No value for escape sequence "
+                                                       (list->string (list format-char))))
+                         (begin
+                           (write (car objects) buffer)
+                           (loop (cddr format-list) (cdr objects)))))
+                    ((eq? format-char #\%)
+                     (newline buffer)
+                     (loop (cddr format-list) objects))
+                    ((eq? format-char #\~)
+                     (write-char #\~ buffer)
+                     (loop (cddr format-list) objects))
+                    (else
+                     (error 'format (string-append "Unrecognized escape sequence "
+                                                   (list->string (list format-char)))))))))
+            (else (write-char (car format-list) buffer)
+                  (loop (cdr format-list) objects))))
+    (loop (string->list format-string) objects)))
+
+(define (open-file-output-port filename)
+  (@open-file-output-port filename))
+
+(define (close-output-port port)
+  (@close-output-port port))

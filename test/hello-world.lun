@@ -1,0 +1,23 @@
+;; .. -*- mode: scheme -*-
+;;
+;; Lunula
+;;
+;; A self-applicable Scheme to C# compiler
+;;
+;; Copyright (c) Anthony Fairchild
+;;
+;; This software is subject to the Microsoft Public License
+;; (Ms-PL). See LICENSE.txt for details.
+;;
+
+
+(display "hello world!")(newline)
+(define hw-factorial
+  (lambda (n)
+    (if (= n 0) 
+        1
+        (* n (hw-factorial (- n 1))))))
+
+(display (format "The factorial of ~A is ~A" 10 
+                 (hw-factorial 10)))
+(newline)

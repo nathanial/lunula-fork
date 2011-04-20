@@ -1,0 +1,504 @@
+;; .. -*- mode: scheme -*-
+;;
+;; Lunula
+;;
+;; A self-applicable Scheme to C# compiler
+;;
+;; Copyright (c) Anthony Fairchild
+;;
+;; This software is subject to the Microsoft Public License
+;; (Ms-PL). See LICENSE.txt for details.
+;;
+
+;;-------------------------------
+;; Test infrastructure
+;;-------------------------------
+(eval-when (:compile-toplevel :load-toplevel :execute)
+           (defmacro test (expected form)
+             `(begin (display (format "--> Testing: ~S" ',form))(newline)
+                     (let ((result ,form)
+                           (expected ,expected))
+                       (cond ((equal? result expected)
+                              (display "    PASSED")(newline))
+                             (else 
+                              (error 'test "    FAILED: Expected ~S but got ~S" expected result)))))))
+
+;;-------------------------------
+(test #t (procedure? (lambda ())))
+(test '(let ()) (read-from-string "(let () )"))
+(test (void) (let () ) )
+
+
+;;-------------------------------
+(test #t (begin 
+          (define (my-equal? a b) 
+              (cond ((and (cons? a)(cons? b)) (and (my-equal? (car a)(car b))
+                                                   (my-equal? (cdr a)(cdr b))))
+                    (else (eqv? a b))))
+          (my-equal? (list 1 2 3)(list 1 2 3))))
+
+;;-------------------------------
+(test 10 (begin 
+          (define x 10)
+          (define (set-in-tail-position n)
+              (set! x n))
+          (set-in-tail-position 10)
+          x))
+
+;;-------------------------------
+(begin
+ (define (mod n m)
+     (if (< n m)
+         n
+         (mod (- n m) m)))
+ (define (euler1 n sum)
+     (if (or (eq? (mod n 3) 0)
+             (eq? (mod n 5) 0))
+         (set! sum (+ sum n)))
+   (cond ((< n 50)
+          (euler1 (+ n 1) sum))
+         (else sum)))
+ (test 593 (euler1 0 0)))
+
+;;-------------------------------
+(begin 
+ (define factorial
+     (lambda (n)
+       (if (= n 0) 
+           1
+           (* n (factorial (- n 1))))))
+ (test 1307674368000 (factorial 15)))
+
+;;-------------------------------
+(begin
+  (define (foo a b)
+    (define (bar a)
+      (* a b))
+    (define c 30)
+    (bar a))
+  (test 200 (foo 10 20)))
+
+;;-------------------------------
+(begin
+ (define (make-adder)
+     (let ((n 0))
+       (lambda () (set! n (+ 1 n)) n)))
+ (define myadd1 (make-adder))
+ (test 1 (myadd1))
+ (define myadd2 (make-adder))
+ (test 2 (myadd1))
+ (test 1 (myadd2))
+ (test 2 (myadd2))
+ (test 3 (myadd1)))
+
+;;-------------------------------
+(begin 
+ (define l1 (list 1 2 'a))
+ (test 1 (car l1))
+ (test 2 (cadr l1))
+ (test 'a (caddr l1))
+
+ (define l2 '(a 2 3))
+ (test 'a (car l2))
+ (test 2 (cadr l2))
+ (test 3 (caddr l2))
+
+ (define l3 '(a (4 5 (d b "c")) 3))
+ (test 'b (cadar (cddadr l3)))
+ (test "c" (caddar (cddadr l3)))
+ (test #t (list? l1))
+ (test #t (list? l2))
+ (test #t (list? l3))
+ (test #t (cons? l1))
+ (test #t (cons? l2))
+ (test #t (cons? l3))
+ (test #t (not (cons? 2)))
+ (test #t (not (cons? "blah")))
+ (test #t (not (cons? '())))
+ (test #t (list? '()))
+ (test '(1 2 3 . 4) '(1 2 3 . 4)))
+
+;;-------------------------------  
+(begin
+ (define (foo x) (* x x))
+ (define (bar . args) (apply * args))
+ (test 100 (apply foo (list 10)))
+ (test 24 (apply bar (list 1 2 3 4))))
+
+;;-------------------------------
+(begin 
+ (define str (string-append "test1" "test 2" "test 3333"))
+ (test "test1test 2test 3333" str)
+ (test "" (string-append))
+ (test #f (eq? "abc" (string-append))))
+
+;;-------------------------------
+(begin
+ (test #t (char? #\x))
+ (test #t (char? #\newline))
+ (test #t (char? #\tab))
+ (test #t (not (char? 123)))
+ (test #t (number? 666))
+ (test #t (number? -1))
+ (test #t (number? -.3))
+ (test #t (number? .055))
+ (test #t (not (number? #\c)))
+ (test #t (not (number? 'a)))
+ (test #t (not (number? "bob")))
+ (test #t (not (number? '(a b c))))
+ (test #t (symbol? 'a))
+ (test #t (symbol? (car '(aa ba ca))))
+ (test #t (symbol? (string->symbol "abc")))
+ (test #t (not (symbol? #\c)))
+ (test #t (not (symbol? "bob")))
+ (test #t (not (symbol? '(a b c))))
+ (test #t (string? "blah"))
+ (test #t (string? ""))
+ (test #t (string? (list->string '(#\a #\b #\c))))
+ (test #t (symbol=? 'and 'and))
+ (test #t (eq? 'and 'and)))
+
+;;-------------------------------
+(begin
+ (test #t (symbol? (read-from-string "test")))
+ (test #t (number? (read-from-string "1")))
+ (test #t (number? (read-from-string "1.0")))
+ (test #t (number? (read-from-string "-.000666")))
+ (test #t (number? (read-from-string "6668238249845")))
+ (test #t (cons?   (read-from-string "(a b c)")))
+ (test #t (string? (cadr (read-from-string "(a \"bah\" c)"))))
+ (test #t (char? (cadr (read-from-string "(a #\\a c)"))))
+ (test #\a (cadr (read-from-string "(a #\\a c)")))
+ (test 'a (car (read-from-string "(a #\\a c)")))
+ (test "bah" (cadr (read-from-string "(a \"bah\" c)")))
+ (test "bah \"asd(1 2 3)fd\"a  dfsdf" (read-from-string "\"bah \\\"asd(1 2 3)fd\\\"a  dfsdf\""))
+ (test #t (eof-object? (read-from-string "")))
+ (test '(1 2 3) (read-from-string ";asdfasdfsad\n(1 2 3;asdfasd\n);asdfsdf\n;asdfads"))
+ (test '(1 2 3) (read-from-string "( 1  2      3 )"))
+ (test '(1 2 3) (read-from-string "(\n 1  2  \n    3\n)"))
+ (test ''(1 2 3) (read-from-string "'( 1  2      3 )"))
+ (test 'asdf (read-from-string "asdf(1 2 3)"))
+ (test 'asdf1234 (read-from-string ";aasdfdsf\nasdf1234\n(1 2 3)"))
+ (test '1234asdf (read-from-string "1234asdf"))
+ (test #t (number? (car (read-from-string "(1 2 3)"))))
+ (test #t (number? (cdr (read-from-string "(1 . 2)"))))
+ (test #t (number? (car (read-from-string "(1 . 2)"))))
+ (test #\newline (read-from-string "\n#\\newline"))
+ (test "\n" (read-from-string "\"\n\""))
+ )
+
+(begin 
+ (let ((a ""))
+   (for-each (lambda (b) (set! a (string-append a b)))
+             (list "hello" "there" "bob"))
+   (test "hellotherebob" a)))
+
+
+;;-------------------------------
+(begin      
+ (test 'a (read-from-string (print-to-string 'a)))
+ (test 123 (read-from-string (print-to-string 123)))
+ (test (list 1 2 3) (read-from-string (print-to-string (list 1 2 3))))
+ (test (list 1 "foo" 3) (read-from-string (print-to-string (list 1 "foo" 3))))
+ (test "foo(1 2 3)" (read-from-string (print-to-string "foo(1 2 3)")))
+ (test #\a (read-from-string (print-to-string #\a)))
+ (test '(list 1 2 3) (read-from-string (print-to-string '(list 1 2 3))))
+ (test '(list #\1 2 3) (read-from-string (print-to-string (list 'list #\1 2 3))))
+ (test '(list a b 24) (read-from-string (print-to-string `(list a b ,(* 1 2 3 4)))))
+ (test '(list a b 1 2 3 4) (read-from-string (print-to-string `(list a b ,@(list 1 2 3 4)))))
+ (test (list '(a . 10) '(b . 20)) (read-from-string (print-to-string '((a . 10)(b . 20)))))
+ (test '(1 2 3 . 4) (read-from-string (print-to-string '(1 2 3 . 4))))
+ (test (list '(a . 10)(cons 'b 20)) (read-from-string (print-to-string '((a . 10)(b . 20)))))
+ (test "\ntest\n" (read-from-string (print-to-string "\ntest\n")))
+ (test "hello\"\\ntest\"test" (display-to-string "hello\"\\ntest\"test"))
+ (test "(1 . 2)" (print-to-string (cons 1 2)))
+ (test "(1 2 3 . 4)" (print-to-string '(1 2 3 . 4))))
+
+;;-------------------------------
+(begin
+ (test "(1 2 3)" (format "~A" (list 1 2 3)))
+ (test "(1 2 3)" (format "~A" (list 1 "2" 3)))
+ (test "(1 \"2\" 3)" (format "~S" (list 1 "2" 3)))
+ (test "this is a test" (format "~A ~A ~A ~A" "this" "is" #\a "test"))
+ (test "\"this is a test\"" (format "~S" "this is a test"))
+ (test "\nprivate Symbol foo = new Symbol(\"bar\");\nprivate Symbol foo2 = new Symbol(\"bar2\");"
+       (format "\nprivate Symbol ~A = new Symbol(\"~A\");~A" 'foo 'bar (format "\nprivate Symbol ~A = new Symbol(\"~A\");" 'foo2 'bar2))))
+
+(begin 
+ (define v (vector 1 2 3 "hello"))
+ (test 1 (vector-ref v 0))
+ (test "hello" (vector-ref v 3))
+ (vector-set! v 1 'test)
+ (test 'test (vector-ref v 1))
+ (test 4 (vector-length v))
+ (test 4 (length v)))
+
+(begin 
+ (define ht (make-hash-table))
+ (test 'none (hash-ref ht 'missing-key 'none))
+ (hash-set! ht 'hello "hello")
+ (hash-set! ht 'there 100)
+ (test "hello" (hash-ref ht 'hello (lambda () 'none)))
+ (test 100 (hash-ref ht 'there 10))
+ (test 2 (length (hash-keys ht)))
+ (test 2 (length (hash-values ht)))
+ (hash-remove! ht 'there)
+ (test 10 (hash-ref ht 'there 10))
+ (test "hello" (hash-ref ht (first (hash-keys ht)))))
+
+(begin 
+ (test '(1 2 3) (apply (lookup-toplevel 'list) 1 2 3 '()))
+ (test #t (not (toplevel-defined? 'blah-does-not-exist)))
+ (test #t (toplevel-defined? 'list))
+ (test #t (procedure? (lookup-toplevel 'cons?))))
+
+(begin    
+ (define (or-macro-fun form env)
+     (define (or->if clauses)
+         (let ((a (gensym))(b (gensym)))
+           (if (null? clauses)
+               #f
+               `(let ((,a ,(car clauses)))
+                  (if ,a ,a ,(or->if (cdr clauses)))))))
+   (or->if (cdr form)))
+
+ (define-toplevel 'orm (make-macro or-macro-fun))
+
+ (test #t (macro-function? (lookup-toplevel 'orm)))
+
+ (test #t (not (eq? 'orm (car (macroexpand-1 '(orm a b)))))))
+
+;;-------------------------------
+;; Test evaluator
+
+(begin
+ (test '(1 2 3) (eval '(list 1 2 3)))
+
+ (test (list 100 22)
+       (eval '(begin
+               (define x 22)
+               (list ((lambda (x)
+                        (define (times x) (* x x))
+                        (times x))
+                      10)
+                     x))))
+ )
+
+;; ;;;; test compile/load
+(load (compile-file "../test/hello-world.lun"))
+(test 39916800 (hw-factorial 11))
+
+(set! hw-factorial '())
+
+(load "../test/hello-world.lun")
+(test 479001600 (hw-factorial 12))
+
+;;;; test the virtual machine
+(define test-code
+  `(template (10 20 30 40 +)
+             ,(reverse '((save-continuation label1)
+                         (fetch-literal 3)
+                         (push)
+                         (fetch-literal 2)
+                         (push)
+                         (fetch-literal 4)
+                         (toplevel-get)
+                         (apply)
+
+                         label1 
+                         (push)
+                         (save-continuation label2)
+                         (fetch-literal 1)
+                         (push)
+                         (fetch-literal 0)
+                         (push)
+                         (fetch-literal 4)
+                         (toplevel-get)
+                         (apply)
+
+                         label2
+                         (push)
+                         (fetch-literal 4)
+                         (toplevel-get)
+                         (apply)))))
+
+
+(test 100 (run-template test-code))
+
+(test 1 (eval '1))
+
+(test 100 (eval  '((lambda (x) (* x x)) 10)))
+
+(test 360 (eval  
+           '((lambda (a b c) 
+               (+ a c
+                  (* c a)
+                  (- c a))) 
+             10 20 30)))
+
+
+(test 12 (eval 
+          '((lambda (a b c) 
+              (+ a c
+                 (* c a)
+                 (- c a)) 12)
+            10 20 30)))
+
+(test 60 (eval  
+          '((lambda (a . args) 
+              (apply + a args))
+            10 20 30)))
+
+(test 65 (eval
+          '((lambda args
+              (apply + args))
+            15 20 30)))
+
+
+(test 12000 (eval
+             '(let ((a 10)
+                    (b 20)
+                    (c 30))
+                (+ (* a b c)
+                   (* a b c)))))
+
+
+(test "blah!" (eval
+               '(let ((a 10)
+                      (b 20))
+                  (if (= a b)
+                      (print "hello")
+                      "blah!"))))
+
+(test 'foo (eval
+            '(let ((a 10)
+                   (b 20))
+               (if (= a a)
+                   'foo
+                   "blah!"))))
+
+(test #f (eval
+          '(let ((a 10)
+                 (b 20))
+             (if (= a b)
+                 'foo))))
+
+(test 65 (eval
+          '(+ (begin "test" 11 55)
+              (begin 'c "foo" 10))))
+
+(test 123 (eval
+            '(let ((a 11)
+                   (b 101)
+                   (c 22))
+               (+ (begin a b c)
+                  (begin c a b)))))
+
+(test 123 (eval
+           '(begin (+ (begin "test" 11 55)
+                      (begin 'c "foo" 10))
+                   (let ((a 11)
+                         (b 101)
+                         (c 22))
+                     (+ (begin a b c)
+                        (begin c a b))))))
+
+(test 1000 (eval
+            '(begin 
+               (define (cube-me x)
+                 (* x x x))
+               (cube-me 10))))
+
+(test 30 (eval
+          '(begin 
+             (define a 0)
+             (define b 0)
+             (set! a 10)
+             (set! b 20)
+             (+ a b))))
+
+(test 30 (eval
+          '(let ((a 0)
+                 (b 0))
+             (set! a 10)
+             (set! b 20)
+             (+ a b))))
+
+
+(test 1 (eval
+         '(car '(1 2 3))))
+      
+(begin 
+  (define (do-n-times n fun)
+    (unless (< n 1)
+            (fun)
+            (do-n-times (- n 1) fun)
+            ;;(apply do-n-times (- n 1) fun '())
+            ))
+  (define n 0)
+  (define up-to 100000)
+  (time 
+   (do-n-times up-to (lambda () 
+                       (set! n (+ 1 n)))))
+  (test n up-to))
+
+(begin
+  (test up-to (eval '(begin 
+                       (define (do-n-times n fun)
+                         (unless (< n 1)
+                                 (fun)
+                                 (do-n-times (- n 1) fun)
+                                 ;;(apply do-n-times (- n 1) fun '())
+                                 ))
+                       (define n 0)
+                       (define up-to 100000)
+                       (time
+                        (do-n-times up-to (lambda () 
+                                            (set! n (+ 1 n)))))
+                       n)))
+
+  (test 10 (eval '((lambda () (define a 10) a))))
+
+  (test (void) (eval '(let ())))
+
+  (test 100 (eval '((lambda (x) (define (times x) (* x x)) (times x)) 10)))
+
+  (test "123" (begin 
+                (define s "")
+                (list (begin (set! s (string-append s "1")) 1)
+                      (begin (set! s (string-append s "2")) 2)
+                      (begin (set! s (string-append s "3")) 3))
+                s))
+
+  (test '(1 (2 3))
+        (begin
+          (define (foo a . args) (list a args))
+          (foo 1 2 3)))
+
+  (test '(1 (2 3))
+        (eval '(begin
+                 (define (foo a . args) (list a args))
+                 (foo 1 2 3)))))
+
+;;; Continuation test (from wikipedia)
+;;; TODO: Figure out what is wrong with this test
+;; (begin
+;;   (define the-continuation #f)
+ 
+;;   (define (test-cont)
+;;     (let ((i 0))
+;;       (call/cc (lambda (k) (set! the-continuation k)))
+;;       (set! i (+ i 1))
+;;       i))
+;;   (test 1 (test-cont))
+;;   (test 2 (the-continuation))
+;;   (test 3 (the-continuation))
+;;   (test 4 (the-continuation))
+;;   (test 5 (the-continuation))
+;;   (define another-continuation the-continuation)
+;;   (test 1 (test-cont))
+;;   (test 2 (the-continuation))
+;;   (test 3 (the-continuation))
+;;   (test 6 (another-continuation))
+;;   (test 7 (another-continuation)))
+

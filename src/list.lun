@@ -1,0 +1,144 @@
+;; .. -*- mode: scheme -*-
+;;
+;; Lunula - A portable Lisp
+;;
+;; Copyright (c) Anthony Fairchild
+;;
+;; This software is subject to the Microsoft Public License
+;; (Ms-PL). See LICENSE.txt for details.
+;;
+
+
+;;(define (cons? x) (@cons? x))
+;;(define (null? x) (@null? x))
+;;(define (car x) (@car x))
+;;(define (cdr x) (@cdr x))
+
+(define pair? cons?)
+(define (list? x) (or (cons? x)(null? x)))
+
+(define (cons x y) (@cons x y))
+
+(define (set-car! c v) (@set-car! c v))
+(define (set-cdr! c v) (@set-cdr! c v))   
+
+(define (caar x) (car (car x)))     
+(define (cadr x) (car (cdr x)))       
+(define (cdar x) (cdr (car x)))     
+(define (cddr x) (cdr (cdr x)))      
+(define (caaar x) (car (caar x)))   
+(define (caadr x) (car (cadr x)))
+(define (cadar x) (car (cdar x)))   
+(define (caddr x) (car (cddr x)))       
+(define (cdaar x) (cdr (caar x)))   
+(define (cdadr x) (cdr (cadr x)))
+(define (cddar x) (cdr (cdar x)))   
+(define (cdddr x) (cdr (cddr x)))       
+(define (caaaar x) (caar (caar x))) 
+(define (caaadr x) (caar (cadr x)))
+(define (caadar x) (caar (cdar x))) 
+(define (caaddr x) (caar (cddr x)))
+(define (cadaar x) (cadr (caar x))) 
+(define (cadadr x) (cadr (cadr x)))
+(define (caddar x) (cadr (cdar x))) 
+(define (cadddr x) (cadr (cddr x)))       
+(define (cdaaar x) (cdar (caar x))) 
+(define (cdaadr x) (cdar (cadr x)))
+(define (cdadar x) (cdar (cdar x))) 
+(define (cdaddr x) (cdar (cddr x)))
+(define (cddaar x) (cddr (caar x))) 
+(define (cddadr x) (cddr (cadr x)))
+(define (cdddar x) (cddr (cdar x))) 
+(define (cddddr x) (cddr (cddr x)))
+
+(define first       car)
+(define second      cadr)
+(define third       caddr)
+(define fourth      cadddr)
+(define (fifth x)   (car (cddddr x)))
+(define (sixth x)   (cadr (cddddr x)))
+(define (seventh x) (caddr (cddddr x)))
+(define (eigth x)   (cadddr (cddddr x)))
+(define (ninth x)   (car (cddddr (cddddr x))))
+
+(define first car)
+(define rest cdr)
+
+(define (list . args) 
+  args)
+
+(define (last lst)
+  (cond ((null? lst) '())
+        ((null? (cdr lst)) lst)
+        (else (last (cdr lst)))))
+
+(define (butlast lst)
+  (cond ((null? lst) '())
+        ((null? (cdr lst)) '())
+        (else (cons (car lst)(butlast (cdr lst))))))
+
+(define (append list1 list2)
+  (cond ((null? list1) list2)
+        (else (set-cdr! (last list1) list2)
+              list1)))
+
+(define (member thing lst)
+  (cond ((null? lst)           #f)
+        ((eq? thing (car lst)) lst)
+        (else                  (member thing (cdr lst)))))   
+
+(define (position thing lst . args)
+  (define accessor (arg-ref args 0 (lambda (x) x)))
+  (define (pos index lst)
+    (cond ((null? lst) #f)
+          ((eq? thing (accessor (car lst))) index)
+          (else (pos (+ 1 index) (cdr lst)))))
+  (pos 0 lst))
+
+(define (for-each fn lis)
+  (unless (null? lis)
+          (fn (car lis))
+          (for-each fn (cdr lis))))
+
+(define (map f ls . more)
+  (define (map1 lis)
+    (if (null? lis)
+        '()
+        (cons (f (car lis))
+              (map1 (cdr lis)))))
+  (define (map-more ls more)
+    (if (null? ls)
+      '()
+      (cons (apply f (car ls) (map car more))
+            (map-more (cdr ls) (map cdr more)))))
+  (if (null? more)
+        (map1 ls)
+        (map-more ls more)))
+
+
+(define (reduce fn lis identity)
+  (if (null? lis)
+      identity
+      (fn (car lis)
+          (reduce fn (cdr lis) identity))))
+
+(define (assoc thing alist)
+  (if (null? alist)
+      #f
+      (if (eq? (car (car alist)) thing)
+          (car alist)
+          (assoc thing (cdr alist)))))
+
+(define (list-length lst) 
+  (define (len lst ans)
+    (cond ((null? lst) ans)
+          (else
+           (len (cdr lst) (+ 1 ans)))))
+  (len lst 0))
+
+(define (reverse lst)
+  (define (rev lst ans)
+    (cond ((null? lst) ans)
+          (else
+           (rev (cdr lst) (cons (car lst) ans)))))
+  (rev lst '()))

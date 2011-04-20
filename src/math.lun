@@ -1,0 +1,39 @@
+;; .. -*- mode: scheme -*-
+;;
+;; Lunula - A portable Lisp
+;;
+;; Copyright (c) Anthony Fairchild
+;;
+;; This software is subject to the Microsoft Public License
+;; (Ms-PL). See LICENSE.txt for details.
+;;
+
+;; Math
+(define (number? x) (@number? x))
+
+(define (= a b) (@= a b))
+(define (> a b) (@> a b))
+(define (>= a b) (@>= a b)) 
+(define (< a b) (@< a b))
+(define (<= a b) (@<= a b))
+
+(define (+ . args) (reduce (lambda (a b)
+                             (@+ a b))
+                           args 0))
+
+(define (* . args) (reduce (lambda (a b)
+                             (@* a b))
+                           args 1))
+
+(define (- a b) (@- a b))
+(define (/ a b) (@/ a b))
+
+(define (max first . rest)
+  (reduce (lambda (a b)
+            (if (> a b) a b))
+          (cons first rest) first))
+
+(define (min first . rest)
+  (reduce (lambda (a b)
+            (if (< a b) a b))
+          (cons first rest) first))

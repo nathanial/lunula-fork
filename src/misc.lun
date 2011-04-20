@@ -1,0 +1,280 @@
+;; .. -*- mode: scheme -*-
+;; 
+;; Lunula - A portable Lisp
+;;
+;; Copyright (c) Anthony Fairchild
+;;
+;; This software is subject to the Microsoft Public License
+;; (Ms-PL). See LICENSE.txt for details.
+;;
+
+;;;;;;;;;;;;;;;;;;;;
+;;;; DOCSTRINGS ;;;;
+;;;;;;;;;;;;;;;;;;;;
+
+(define docstrings 
+;;  "an alist of symbol/docstring pairs" 
+  '())
+
+(define (set-docstring! symbol docstring)
+;;   "Sets the docstring for a symbol.  Docstrings can be retrived with
+;; the docstring function."
+  (assert (symbol? symbol))
+  (assert (string? docstring))
+  (let ((entry (assoc symbol docstrings)))
+    (if entry
+        (set-cdr! entry docstring)
+        (set! docstrings (cons (cons symbol docstring) docstrings)))))
+
+(define (docstring symbol)
+;;  "Gets the docstring of a symbol."
+  (assert (symbol? symbol))
+  (let ((pair (assoc symbol docstrings)))
+    (if pair
+        (display (cdr pair))(newline)
+        (printf "No docstring for ~S~%" symbol))))
+
+;;;;;;;;;;;;;;;;
+;;;; GENSYM ;;;;
+;;;;;;;;;;;;;;;;
+
+(define next-sym-num 0)
+(define (gensym)
+  (set! next-sym-num (+ next-sym-num 1))         
+  (string->symbol (format "g~A" next-sym-num)))
+
+;; vector
+(define (vector . args)
+  (@make-vector args))
+
+(define (vector-ref vector index)
+  (@vector-ref vector index))
+
+(define (vector-set! v index value)
+  (assert (vector? v))
+  (@vector-set v index value))
+
+(define (vector? x)
+  (@vector? x))
+
+(define (vector-length x)
+  (assert (vector? x))
+  (@vector-length x))
+
+;; hashtable
+(define (make-hash-table)
+  (@make-hash-table))
+
+(define (hash-ref table . args)
+  (let* ((key (arg-ref args 0 #f))
+         (failure-result (arg-ref args 1 (lambda () (error 'hash-ref "No such key ~A" key))))
+         (result (@hash-ref table key failure-result)))
+    (if (eq? failure-result result)
+        (if (procedure? failure-result)
+            (failure-result)
+            failure-result)
+        result)))
+
+(define (hash-has-key table key)
+  (let ((has-key #t))
+    (hash-ref table (lambda () (set! has-key #f)))
+    has-key))
+
+(define (hash-keys table)
+  (@hash-keys table))
+
+(define (hash-values table)
+  (@hash-values table))
+
+(define (hash-set! table key value)
+  (@hash-set! table key value))
+
+(define (hash-remove! table key)
+  (@hash-remove! table key))
+
+;; sequences
+
+(define (length x) ;; TODO: this should eventually be a generic function
+  (cond ((vector? x) (vector-length x))
+        ((string? x) (string-length x))
+        ((list? x)   (list-length x))
+        (else        (error 'length "~A is not a list, vector or string" x))))
+
+;; string
+
+(define (string? x) 
+  (@string? x))
+
+(define (string=? a b) 
+  (@string=? a b))
+
+(define (string-length x)
+  (@string-length x))
+
+(define (string-append . args)
+  (reduce @string-append args ""))
+
+(define (string->list str)(@string->list str))       
+(define (list->string lst)(@list->string lst))
+
+(define (string->number str)(@string->number str))
+(define (number->string s) (@number->string s))
+
+(define (string->symbol str)(@string->symbol str))
+(define (symbol->string s) (@symbol->string s))
+
+
+(define (open-output-string)(@open-output-string))       
+(define (open-input-string str)(@open-input-string str))
+(define (get-output-string port)(@get-output-string port))       
+
+;; boolean
+(define (boolean? x)(@boolean? x))
+
+(define (boolean=? a b) 
+  (assert (and (boolean? a)
+               (boolean? b)))
+  (@boolean=? a b))
+
+;; char
+(define (char? x)   
+  (@char? x))
+
+(define (char=? a b) 
+  (assert (and (char? a)(char? b)))
+  (@char=? a b))
+
+(define (char-alphabetic? ch) 
+  (assert (char? ch))
+  (@char-alphabetic? ch))
+
+(define (char-numeric? ch) 
+  (assert (char? ch))
+  (@char-numeric? ch))
+
+;; symbol
+(define (symbol? x) 
+  (@symbol? x))
+
+(define (symbol=? a b) 
+  (assert (and (symbol? a)(symbol? b)))
+  (@symbol=? a b))
+
+;; other
+
+(define call-with-current-continuation call/cc)
+
+(define (procedure? x) 
+  (@procedure? x))
+ 
+(define (arg-ref args n default)
+  (cond ((null? args) default)
+        ((= 0 n) (car args))
+        (else (arg-ref (cdr args) (- n 1) default))))
+
+(define (arg-rest args n)
+  (cond ((null? args) '())
+        ((= 0 n) args)
+        (else (arg-rest (cdr args) (- n 1)))))
+
+(define (make-apply-args args)
+  (cond ((null? args) '())
+        ((null? (cdr args)) (car args))
+        (else (cons (car args)(make-apply-args (cdr args))))))
+
+(define (apply fun . args)
+  (@apply fun (make-apply-args args)))
+
+;; TODO: these should by dynamic variables
+(define (current-output-port) (@current-output-port))
+(define (current-error-port) (@current-error-port))
+(define (current-input-port) (@current-input-port))
+
+(define (split-string str delimeters)
+  (let ((chars (string->list str))
+        (segments '())
+        (so-far '()))
+    (for-each (lambda (c)
+                (cond ((member c delimeters)
+                       (set! segments (cons (list->string (reverse so-far)) segments))
+                       (set! so-far '()))
+                      (else (set! so-far (cons c so-far)))))
+              chars)
+    (set! segments (cons (list->string (reverse so-far)) segments))
+    (reverse segments)))
+
+(define (join-strings strs delimeter)
+  (cond ((null? strs) "")
+        ((and (cons? strs)(null? (cdr strs))) (car strs))
+        (else
+         (string-append (car strs) (list->string (list delimeter))
+                        (join-strings (cdr strs) delimeter)))))
+
+(define (parse-path-string str)
+  (let* ((path-split (split-string str '(#\/ #\\)))
+         (directory (butlast path-split))
+         (file (car (last path-split))))
+    (cond ((string=? "" file) 
+           (list path-split '(()())))
+          (else
+           (list directory (split-string file '(#\.)))))))
+
+(define (pathname-filename path)
+  (caadr (parse-path-string path)))
+
+(define (pathname-extension path)
+  (cadadr (parse-path-string path)))
+
+(define (pathname-directory path)
+  (let ((dirs (car (parse-path-string path))))
+    (if (null? dirs)
+        ""
+        (string-append (join-strings dirs #\/) "/"))))
+
+;; errors
+
+(define (fail str) (@fail str))
+
+(define error-handler fail)
+
+(define (error . args)  
+  (let ((error-type (arg-ref args 0 'unspecified))
+        (error-msg  (arg-ref args 1 "An error has occured"))
+        (error-rest (arg-rest args 2)))
+    (error-handler (format "~A: ~A" error-type 
+                           (apply format error-msg error-rest)))))
+
+(define (handle-error fun handler-fun)
+  (when (not (procedure? fun))
+        (error 'handle-error "fun ~A is not a function"))
+  (when (not (procedure? handler-fun))
+        (error 'handle-error "hander-fun ~A is not a function"))
+  (@catch-error fun handler-fun))
+
+(define (exit code) 
+  (assert (number? code))
+  (@exit code))
+
+(define (quit) (exit 0))
+
+;;;; debugging 
+(define (trace . args)
+  (let ((port (current-error-port)))
+    (display "TRACE: " port)
+    (display (apply format args) port)
+    (newline port)
+    (flush-output port)))
+
+;;;; equality
+;; (define (eq? a b)  
+;;   (@eq? a b))
+
+(define (eqv? a b) (eq? a b))
+
+(define (equal? a b) 
+  (cond ((and (cons? a)(cons? b)) (and (equal? (car a)(car b))
+                                       (equal? (cdr a)(cdr b))))
+        (else (eqv? a b))))
+
+(define (not x)
+  (eq? x #f))
