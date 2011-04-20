@@ -13,196 +13,61 @@ using System.Collections.Generic;
 using System.IO;
 using System.Diagnostics;
 using System.Linq;
-using System.Reflection;
-#if !SILVERLIGHT
-using Microsoft.CSharp;
-#endif
-using System.CodeDom.Compiler;
 
 
 namespace Lunula {
-#if PROFILER
-    public class Profiler
-    {
-        public class ProfileData
-        {
-            public string Name = null;
-            public Dictionary<string, int> CalledBy = new Dictionary<string, int>();
-            public int Invocations = 0;
-            public double MillisecondsInFunction = 0;
-        }
-
-        private Dictionary<Lunula.Template, string> _templateNames = new Dictionary<Lunula.Template, string>();
-        private Dictionary<string, ProfileData> _profileData = new Dictionary<string, ProfileData>();
-        Dictionary<Lunula.Symbol, object> _toplevel;
-
-        Stopwatch _stopwatch = new Stopwatch();
-
-        public Profiler(Dictionary<Lunula.Symbol, object> toplevel)
-        {
-            _toplevel = toplevel;
-        }
-
-
-        private bool IsSubTemplate(Lunula.Template parent, Lunula.Template tempToFind)
-        {
-            if (parent == tempToFind) return true;
-            foreach (var literal in parent.Literals)
-            {
-                if (literal is Lunula.Template)
-                {
-                    if (IsSubTemplate((Lunula.Template)literal, tempToFind))
-                        return true;
-                }
-            }
-            return false;
-        }
-
-        private string FindTemplateName(Lunula.Template template)
-        {
-            foreach(var kv in _toplevel)
-            {
-                if (kv.Value is Lunula.Closure)
-                {
-                    if (IsSubTemplate(((Lunula.Closure)kv.Value).Template, template))
-                        return kv.Key.Name;
-                }
-            }
-            return "anonymous";
-        }
-
-        private void TransitionTemplates(Lunula.Template t1, Lunula.Template t2)
-        {
-            string t1Name = "";
-            if (t1 != null)
-            {
-                if (!_templateNames.TryGetValue(t1, out t1Name))
-                {
-                    t1Name = FindTemplateName(t1);
-                    _templateNames[t1] = t1Name;
-                }
-
-                // stop t1 timing
-                _stopwatch.Stop();
-                _profileData[t1Name].MillisecondsInFunction += _stopwatch.ElapsedMilliseconds;
-            }
-
-            // start t2 timing
-            string t2Name;
-            if (!_templateNames.TryGetValue(t2, out t2Name))
-            {
-                t2Name = FindTemplateName(t2);
-                _templateNames[t2] = t2Name;
-            }
-
-            _stopwatch.Reset();
-            _stopwatch.Start();
-
-            ProfileData profData;
-            if (!_profileData.TryGetValue(t2Name, out profData))
-            {
-                profData = new ProfileData();
-                profData.Name = t2Name;
-                _profileData[t2Name] = profData;
-            }
-
-        }
-
-        public void ExitFunction(Lunula.Template child, Lunula.Template parent)
-        {
-            TransitionTemplates(child, parent);
-        }
-
-        public void EnterFunction(Lunula.Template parent, Lunula.Template child)
-        {
-            TransitionTemplates(parent, child);
-            ProfileData profData = _profileData[_templateNames[child]];
-            profData.Invocations++;
-
-            if (parent != null)
-            {
-                string parentName = _templateNames[parent];
-                if (parentName != null)
-                {
-                    int callCount;
-                    if (!profData.CalledBy.TryGetValue(parentName, out callCount))
-                    {
-                        profData.CalledBy[parentName] = 1;
-                    }
-                    else
-                    {
-                        profData.CalledBy[parentName]++;
-                    }
-                }
-            }
-        }
-
-        public void PrintProfileData()
-        {
-            var profileData = _profileData.OrderByDescending(kv => kv.Value.MillisecondsInFunction).Take(100).Reverse();
-            foreach (var pd in profileData)
-            {
-                Console.WriteLine("Fun: " + (pd.Value.Name == null ? "Anonymous" : pd.Value.Name) + " Called: " + pd.Value.Invocations + " Time: " + pd.Value.MillisecondsInFunction);
-                foreach (var cd in pd.Value.CalledBy.OrderBy(cc => cc.Value))
-                {
-                    Console.WriteLine("  Called By:" + cd.Key + " " + cd.Value + " times");
-                }
-            }
-        }
-    }
-#endif // PROFILER
     public class Void {
-        private Void() { }
+        Void() { }
         public static Void TheVoidValue = new Void();
     }
 
     public class Symbol : object {
-        private static Dictionary<string, Symbol> internedSymbols = new Dictionary<string, Symbol>();
-        private string name;
-        public string Name { get { return name; } }
-        private Symbol(string name) { this.name = name; }
+        static readonly Dictionary<string, Symbol> InternedSymbols = new Dictionary<string, Symbol>();
+        readonly string _name;
+        public string Name { get { return _name; } }
+        Symbol(string name) { _name = name; }
         public static Symbol Intern(string name) {
             Symbol value;
-            if (internedSymbols.TryGetValue(name, out value)) {
-                return value;
-            } else {
-                value = new Symbol(name);
-                internedSymbols[name] = value;
+            if (InternedSymbols.TryGetValue(name, out value)) {
                 return value;
             }
+            value = new Symbol(name);
+            InternedSymbols[name] = value;
+            return value;
         }
-        public override string ToString() { return "SYM:" + name.ToString(); }
+        public override string ToString() { return "SYM:" + _name; }
     }
 
     class PeekableTextReaderAdapter {
-        TextReader reader;
-        List<int> queue = new List<int>();
+        readonly TextReader _reader;
+        readonly List<int> _queue = new List<int>();
 
         public PeekableTextReaderAdapter(TextReader reader) {
-            this.reader = reader;
+            _reader = reader;
         }
 
         public void Close() {
-            reader.Close();
+            _reader.Close();
         }
 
         public int Peek(int n) {
-            while (queue.Count < (n + 1)) {
-                queue.Add(reader.Read());
+            while (_queue.Count < (n + 1)) {
+                _queue.Add(_reader.Read());
             }
-            return queue[n];
+            return _queue[n];
         }
         public int Read() {
-            if (queue.Count > 0) {
-                var item = queue[0];
-                queue.RemoveAt(0);
+            if (_queue.Count > 0) {
+                var item = _queue[0];
+                _queue.RemoveAt(0);
                 return item;
-            } else return reader.Read();
+            }
+            return _reader.Read();
         }
     }
 
     public class TaggedType {
-        private Symbol _tag;
+        readonly Symbol _tag;
         public object Data;
         public TaggedType(Symbol tag, object data) {
             _tag = tag;
@@ -213,37 +78,37 @@ namespace Lunula {
     }
 
     public class Cons {
-        private object car;
-        private object cdr;
+        object _car;
+        object _cdr;
         public Cons(object car, object cdr) {
-            this.car = car;
-            this.cdr = cdr;
+            _car = car;
+            _cdr = cdr;
         }
         public static object Car(object cons) {
-            if (cons is Cons) return ((Cons)cons).car;
+            if (cons is Cons) return ((Cons)cons)._car;
             if (cons == null) return cons;
             throw new LunulaException(string.Format("object {0} is not a cons", cons));
         }
         public static object Cdr(object cons) {
-            if (cons is Cons) return ((Cons)cons).cdr;
+            if (cons is Cons) return ((Cons)cons)._cdr;
             if (cons == null) return cons;
             throw new LunulaException(string.Format("object {0} is not a cons", cons));
         }
         public static object SetCar(object c, object v) {
-            if (c is Cons) ((Cons)c).car = v;
+            if (c is Cons) ((Cons)c)._car = v;
             else throw new LunulaException(string.Format("object {0} is not a cons", c));
             return Void.TheVoidValue;
         }
         public static object SetCdr(object c, object v) {
-            if (c is Cons) ((Cons)c).cdr = v;
+            if (c is Cons) ((Cons)c)._cdr = v;
             else throw new LunulaException(string.Format("object {0} is not a cons", c));
             return Void.TheVoidValue;
         }
         public static object Reverse(object cons) {
             object reversed = null;
             while (cons != null) {
-                reversed = new Cons(Cons.Car(cons), reversed);
-                cons = Cons.Cdr(cons);
+                reversed = new Cons(Car(cons), reversed);
+                cons = Cdr(cons);
             }
             return reversed;
         }
@@ -251,42 +116,36 @@ namespace Lunula {
             int length = 0;
             while (cons != null) {
                 length++;
-                cons = Cons.Cdr(cons);
+                cons = Cdr(cons);
             }
             return length;
         }
 
         public static object[] ToReverseObjectArray(object cons) {
-            int length = Cons.Length(cons);
-            object[] objs = new object[length];
-            for (int x = 0; x < length; x++) {
-                objs[length - 1 - x] = Cons.Car(cons);
-                cons = Cons.Cdr(cons);
+            var length = Length(cons);
+            var objs = new object[length];
+            for (var x = 0; x < length; x++) {
+                objs[length - 1 - x] = Car(cons);
+                cons = Cdr(cons);
             }
             return objs;
         }
         public static object[] ToObjectArray(object cons) {
-            int length = Length(cons);
-            object[] objs = new object[length];
-            for (int x = 0; x < length; x++) {
-                objs[x] = Cons.Car(cons);
-                cons = Cons.Cdr(cons);
+            var length = Length(cons);
+            var objs = new object[length];
+            for (var x = 0; x < length; x++) {
+                objs[x] = Car(cons);
+                cons = Cdr(cons);
             }
             return objs;
         }
         public static object ConsFromIEnumerable(IEnumerable<object> collection) {
-            object c = null;
-            foreach (var thing in collection) {
-                c = new Cons(thing, c);
-            }
-            return Cons.Reverse(c);
+            var c = collection.Aggregate<object, object>(null, (current, thing) => new Cons(thing, current));
+            return Reverse(c);
         }
         public static object ConsFromArray(object[] array) {
-            object c = null;
-            for (int x = 0; x < array.Length; x++) {
-                c = new Cons(array[x], c);
-            }
-            return Cons.Reverse(c);
+            var c = array.Aggregate<object, object>(null, (current, t) => new Cons(t, current));
+            return Reverse(c);
         }
     }
 
@@ -310,7 +169,7 @@ namespace Lunula {
     public class EOF { public static EOF TheEOFValue = new EOF(); }
 
     public class Builtins {
-        LunulaVM _vm;
+        readonly LunulaVM _vm;
 
         public Builtins(LunulaVM vm) {
             _vm = vm;
@@ -361,7 +220,6 @@ namespace Lunula {
             vm.DefineFunction("@current-output-port", GetStdOut);
             vm.DefineFunction("@current-error-port", GetStdError);
             vm.DefineFunction("@current-input-port", GetStdIn);
-            vm.DefineFunction("@exit", Exit);
             vm.DefineFunction("@cons", MakeCons);
             vm.DefineFunction("@set-car!", SetCar);
             vm.DefineFunction("@set-cdr!", SetCdr);
@@ -397,8 +255,8 @@ namespace Lunula {
             vm.DefineFunction("@peek-char", PeekChar);
             vm.DefineFunction("@peek-char-skip", PeekCharSkip);
             vm.DefineFunction("@eof-object?", IsEOFObject);
-            vm.DefineFunction("@cons?", (thing) => thing is Cons);
-            vm.DefineFunction("@null?", (thing) => thing == null);
+            vm.DefineFunction("@cons?", thing => thing is Cons);
+            vm.DefineFunction("@null?", thing => thing == null);
             vm.DefineFunctionN("@apply", parms => {
                 var fun = parms.First();
                 var args = Cons.Car(Cons.ConsFromArray(parms.Skip(1).ToArray()));
@@ -409,115 +267,110 @@ namespace Lunula {
             vm.DefineFunction("@run-template", RunTemplate);
             vm.DefineFunction("@load-lvm-file", LoadLVMFile);
             vm.DefineFunction("@print-profile-data", () => {
-#if PROFILER
-                _profiler.PrintProfileData(); 
-                return Void.TheVoidValue; 
-#else
                 throw new LunulaException("Profiler not enabled");
-#endif
             });
             vm.DefineFunction("@make-type", (tag, data) => new TaggedType((Symbol)tag, data));
-            vm.DefineFunction("@type-symbol", (type) => ((TaggedType)type).Tag);
-            vm.DefineFunction("@type-data", (type) => ((TaggedType)type).Data);
+            vm.DefineFunction("@type-symbol", type => ((TaggedType)type).Tag);
+            vm.DefineFunction("@type-data", type => ((TaggedType)type).Data);
             vm.DefineFunction("@type-data-set!", (type, data) => { ((TaggedType)type).Data = data; return Void.TheVoidValue; });
             vm.DefineFunction("call/cc", _vm.CallWithCurrentContinuation);
         }
 
-        private object MakeVector(object list) {
+        static object MakeVector(object list) {
             return Cons.ToObjectArray(list);
         }
-        private object VectorRef(object v, object i) {
+
+        static object VectorRef(object v, object i) {
             return ((object[])v)[(int)(double)i];
         }
 
-        private object VectorSet(object v, object i, object val) {
+        static object VectorSet(object v, object i, object val) {
             ((object[])v)[(int)(double)i] = val;
             return Void.TheVoidValue;
         }
 
-        private object VectorLength(object v) {
+        static object VectorLength(object v) {
             return ((double)((object[])v).Length);
         }
 
-        private object IsVector(object thing) {
+        static object IsVector(object thing) {
             return (thing is object[]);
         }
 
-        private object MakeHashTable() {
+        static object MakeHashTable() {
             return new Dictionary<object, object>();
         }
 
-        private object HashSet(object table, object key, object value) {
+        static object HashSet(object table, object key, object value) {
             ((Dictionary<object, object>)table)[key] = value;
             return Void.TheVoidValue;
         }
-        private object HashRef(object table, object key, object failureResult) {
+
+        static object HashRef(object table, object key, object failureResult) {
             object value;
-            if (((Dictionary<object, object>)table).TryGetValue(key, out value))
-                return value;
-            else
-                return failureResult;
+            return ((Dictionary<object, object>)table).TryGetValue(key, out value) ? value : failureResult;
         }
-        private object HashRemove(object table, object key) {
+
+        static object HashRemove(object table, object key) {
             ((Dictionary<object, object>)table).Remove(key);
             return Void.TheVoidValue;
         }
 
-        private object HashKeys(object table) {
+        static object HashKeys(object table) {
             var d = (Dictionary<object, object>)table;
             return Cons.ConsFromIEnumerable(d.Keys);
         }
 
-        private object HashValues(object table) {
+        static object HashValues(object table) {
             var d = (Dictionary<object, object>)table;
             return Cons.ConsFromIEnumerable(d.Values);
         }
 
-        private object IsBoolean(object thing) {
+        static object IsBoolean(object thing) {
             return thing is bool;
         }
 
-        private object BooleanEquals(object a, object b) {
+        static object BooleanEquals(object a, object b) {
             return (bool)a == (bool)b;
         }
 
-        private object IsChar(object thing) {
+        static object IsChar(object thing) {
             return thing is char;
         }
 
-        private object CharEquals(object a, object b) {
+        static object CharEquals(object a, object b) {
             return (char)a == (char)b;
         }
 
-        private object IsCharAlphabetic(object ch) {
+        static object IsCharAlphabetic(object ch) {
             return char.IsLetter((char)ch);
         }
 
-        private object IsCharNumeric(object ch) {
+        static object IsCharNumeric(object ch) {
             return char.IsDigit((char)ch);
         }
 
-        private object CharCode(object ch) {
+        static object CharCode(object ch) {
             return (double)(int)(char)ch;
         }
 
-        private object IsSymbol(object thing) {
+        static object IsSymbol(object thing) {
             return thing is Symbol;
         }
 
-        private object SymbolEquals(object a, object b) {
-            return (Symbol)a == (Symbol)b;
+        static object SymbolEquals(object a, object b) {
+            return a == b;
         }
 
-        private object IsVoid(object thing) {
+        static object IsVoid(object thing) {
             return thing is Void;
         }
 
-        private object MakeVoid() {
+        static object MakeVoid() {
             return Void.TheVoidValue;
         }
 
-        private object IsProcedure(object thing) {
+        static object IsProcedure(object thing) {
             return
                 thing is Closure ||
                 thing is Func<object> ||
@@ -527,145 +380,152 @@ namespace Lunula {
                 thing is Func<object, object, object, object, object>;
         }
 
-        private object ToplevelIsDefined(object symbol) {
+        object ToplevelIsDefined(object symbol) {
             return _vm.ToplevelIsDefined((Symbol)symbol);
         }
 
-        private object ToplevelLookup(object name) {
+        object ToplevelLookup(object name) {
             return _vm.ToplevelLookup((Symbol)name);
         }
 
-        private object ToplevelDefine(object name, object value) {
+        object ToplevelDefine(object name, object value) {
             _vm.ToplevelDefine((Symbol)name, value);
             return Void.TheVoidValue;
         }
-        private object IsCons(object thing) {
+
+        static object IsCons(object thing) {
             return thing is Cons;
         }
 
-        private object IsNull(object thing) {
+        static object IsNull(object thing) {
             return thing == null;
         }
 
-        private object IsNumber(object thing) {
+        static object IsNumber(object thing) {
             return thing is double;
         }
 
-        private object NumberEqual(object a, object b) {
+        static object NumberEqual(object a, object b) {
             return (double)a == (double)b;
         }
 
-        private object NumberGreaterThan(object a, object b) {
+        static object NumberGreaterThan(object a, object b) {
             return (double)a > (double)b;
         }
 
-        private object NumberGreaterThanAndEqual(object a, object b) {
+        static object NumberGreaterThanAndEqual(object a, object b) {
             return (double)a >= (double)b;
         }
 
-        private object NumberLessThan(object a, object b) {
+        static object NumberLessThan(object a, object b) {
             return (double)a < (double)b;
         }
 
-        private object NumberLessThanAndEqual(object a, object b) {
+        static object NumberLessThanAndEqual(object a, object b) {
             return (double)a <= (double)b;
         }
 
-        private object TwoArgPlus(object a, object b) {
+        static object TwoArgPlus(object a, object b) {
             return (double)a + (double)b;
         }
 
-        private object TwoArgMinus(object a, object b) {
+        static object TwoArgMinus(object a, object b) {
             return (double)a - (double)b;
         }
 
-        private object TwoArgMultiply(object a, object b) {
+        static object TwoArgMultiply(object a, object b) {
             return (double)a * (double)b;
         }
 
-        private object TwoArgDivide(object a, object b) {
+        static object TwoArgDivide(object a, object b) {
             return (double)a / (double)b;
         }
 
-        private object BinaryOr(object a, object b) {
+        static object BinaryOr(object a, object b) {
             return (double)(((uint)(double)a) | ((uint)(double)b));
         }
 
-        private object LeftShift(object a, object b) {
+        static object LeftShift(object a, object b) {
             return (double)(((uint)(double)a) << ((int)(double)b));
         }
 
-        private Cons MakeCons(object a, object b) {
+        static Cons MakeCons(object a, object b) {
             return new Cons(a, b);
         }
-        private object Car(object cons) {
+
+        static object Car(object cons) {
             return Cons.Car(cons);
         }
-        private object Cdr(object cons) {
+
+        static object Cdr(object cons) {
             return Cons.Cdr(cons);
         }
-        private object SetCar(object cons, object value) {
+
+        static object SetCar(object cons, object value) {
             return Cons.SetCar(cons, value);
         }
-        private object SetCdr(object cons, object value) {
+
+        static object SetCdr(object cons, object value) {
             return Cons.SetCdr(cons, value);
         }
 
-        private object IsString(object thing) {
+        static object IsString(object thing) {
             return thing is string;
         }
 
-        private object StringEquals(object a, object b) {
+        static object StringEquals(object a, object b) {
             return ((string)a).Equals((string)b);
         }
 
-        private object StringLength(object str) {
+        static object StringLength(object str) {
             return (double)((string)str).Length;
         }
 
-        private object StringAppend(object a, object b) {
+        static object StringAppend(object a, object b) {
             return (string)a + (string)b;
         }
 
-        private object SymbolToString(object sym) {
+        static object SymbolToString(object sym) {
             return ((Symbol)sym).Name;
         }
 
-        private object NumberToString(object num) {
+        static object NumberToString(object num) {
             return ((double)num).ToString();
         }
 
-        private object OpenInputString(object str) { return new PeekableTextReaderAdapter(new StringReader((string)str)); }
-        private object OpenOutputString() { return new StringWriter(); }
-        private object GetOutputString(object port) { return ((StringWriter)port).ToString(); }
+        static object OpenInputString(object str) { return new PeekableTextReaderAdapter(new StringReader((string)str)); }
+        static object OpenOutputString() { return new StringWriter(); }
+        static object GetOutputString(object port) { return port.ToString(); }
 
-        private object OpenOutputByteArray() { return new BinaryWriter(new MemoryStream()); }
-        private object GetOutputByteArray(object port) { return ((MemoryStream)((BinaryWriter)port).BaseStream).ToArray(); }
+        static object OpenOutputByteArray() { return new BinaryWriter(new MemoryStream()); }
+        static object GetOutputByteArray(object port) { return ((MemoryStream)((BinaryWriter)port).BaseStream).ToArray(); }
 
-        private object WriteByte(object x, object port) {
+        static object WriteByte(object x, object port) {
             ((BinaryWriter)port).Write((byte)(double)x);
             return Void.TheVoidValue;
         }
-        private object WriteWord(object x, object port) {
+
+        static object WriteWord(object x, object port) {
             ((BinaryWriter)port).Write((UInt16)(double)x);
             return Void.TheVoidValue;
         }
-        private object WriteDWord(object x, object port) {
+
+        static object WriteDWord(object x, object port) {
             ((BinaryWriter)port).Write((UInt32)(double)x);
             return Void.TheVoidValue;
         }
 
-        private object GetStdOut() { return Console.Out; }
-        private object GetStdIn() { return new PeekableTextReaderAdapter(Console.In); }
-        private object GetStdError() { return Console.Error; }
+        static object GetStdOut() { return Console.Out; }
+        static object GetStdIn() { return new PeekableTextReaderAdapter(Console.In); }
+        static object GetStdError() { return Console.Error; }
 
-        private object OpenFileInputPort(object filename) { return new PeekableTextReaderAdapter(new StreamReader((string)filename)); }
-        private object CloseInputPort(object port) { ((PeekableTextReaderAdapter)port).Close(); return Void.TheVoidValue; }
+        static object OpenFileInputPort(object filename) { return new PeekableTextReaderAdapter(new StreamReader((string)filename)); }
+        static object CloseInputPort(object port) { ((PeekableTextReaderAdapter)port).Close(); return Void.TheVoidValue; }
 
-        private object OpenFileOutputPort(object filename) { return new StreamWriter((string)filename); }
-        private object OpenBinaryFileOutputPort(object filename) { return new BinaryWriter(new FileStream((string)filename, FileMode.Create)); }
+        static object OpenFileOutputPort(object filename) { return new StreamWriter((string)filename); }
+        static object OpenBinaryFileOutputPort(object filename) { return new BinaryWriter(new FileStream((string)filename, FileMode.Create)); }
 
-        private object CloseOutputPort(object port) {
+        static object CloseOutputPort(object port) {
             if (port is StreamWriter) {
                 ((StreamWriter)port).Close();
             } else {
@@ -674,50 +534,45 @@ namespace Lunula {
             return Void.TheVoidValue;
         }
 
-        private object WriteChar(object x, object port) { ((TextWriter)port).Write((char)x); return Void.TheVoidValue; }
-        private object WriteString(object x, object port) { ((TextWriter)port).Write((string)x); return Void.TheVoidValue; }
-        private object FlushOutput(object port) { ((TextWriter)port).Flush(); return Void.TheVoidValue; }
+        static object WriteChar(object x, object port) { ((TextWriter)port).Write((char)x); return Void.TheVoidValue; }
+        static object WriteString(object x, object port) { ((TextWriter)port).Write((string)x); return Void.TheVoidValue; }
+        static object FlushOutput(object port) { ((TextWriter)port).Flush(); return Void.TheVoidValue; }
 
-        private object GetTime() {
+        static object GetTime() {
             return DateTime.Now;
         }
 
-        private object TimeDifference(object a, object b) {
-            return (double)(((DateTime)a) - ((DateTime)b)).TotalMilliseconds;
+        static object TimeDifference(object a, object b) {
+            return (((DateTime)a) - ((DateTime)b)).TotalMilliseconds;
         }
 
-        private object Exit(object code) {
-#if SILVERLIGHT
-            Fail("Exit not supported in Silverlight");
-#else
-            System.Environment.Exit((int)(double)code);
-#endif
-            return Void.TheVoidValue;
-        }
-
-        private object StaticToString(object thing) {
+        static object StaticToString(object thing) {
             return thing.ToString();
         }
-        private object IsEOFObject(object thing) { return thing is EOF; }
 
-        private object ReadChar(object port) {
+        static object IsEOFObject(object thing) { return thing is EOF; }
+
+        static object ReadChar(object port) {
             var c = ((PeekableTextReaderAdapter)port).Read();
-            return c == -1 ? (object)EOF.TheEOFValue : (object)(char)c;
+            return c == -1 ? (object)EOF.TheEOFValue : (char)c;
         }
-        private object PeekChar(object port) {
+
+        static object PeekChar(object port) {
             var c = ((PeekableTextReaderAdapter)port).Peek(0);
-            return c == -1 ? (object)EOF.TheEOFValue : (object)(char)c;
+            return c == -1 ? (object)EOF.TheEOFValue : (char)c;
         }
-        private object PeekCharSkip(object port, object n) {
+
+        static object PeekCharSkip(object port, object n) {
             var c = ((PeekableTextReaderAdapter)port).Peek((int)(double)n);
-            return c == -1 ? (object)EOF.TheEOFValue : (object)(char)c;
+            return c == -1 ? (object)EOF.TheEOFValue : (char)c;
         }
-        private object StringToList(object str) {
-            object cons = null;
-            foreach (var c in (string)str) cons = new Cons(c, cons);
+
+        static object StringToList(object str) {
+            object cons = ((string)str).Aggregate<char, object>(null, (current, c) => new Cons(c, current));
             return Cons.Reverse(cons);
         }
-        private object ListToString(object list) {
+
+        static object ListToString(object list) {
             string outStr = "";
             while (list != null) {
                 outStr += (char)Cons.Car(list);
@@ -725,33 +580,26 @@ namespace Lunula {
             }
             return outStr;
         }
-        private object StringToSymbol(object str) {
+
+        static object StringToSymbol(object str) {
             return Symbol.Intern((string)str);
         }
 
-        private object StringToNumber(object str) {
-            double d;
-            if (double.TryParse((string)str, out d))
-                return d;
-            else
+        static object StringToNumber(object obj) {
+            var str = (string)obj;
+            if (!Char.IsDigit(str[0])) return false;
+            try {
+                return double.Parse(str);
+            } catch (FormatException) {
                 return false;
-        }
-        private bool Equal(object a, object b) {
-            if (a == null && b == null) return true;
-            if (a == null || b == null) return false;
-            bool r = a.Equals(b);
-            return r;
+            }
         }
 
-        private object ConsFromArray(object[] array) {
-            return Cons.ConsFromArray(array);
-        }
-
-        private object Fail(object msg) {
+        static object Fail(object msg) {
             throw new LunulaException(msg.ToString());
         }
 
-        private object CatchError(object fun, object handlerFun) {
+        object CatchError(object fun, object handlerFun) {
             try {
                 return _vm.Apply(fun);
             } catch (Exception e) {
@@ -759,19 +607,19 @@ namespace Lunula {
             }
         }
 
-        private object ObjectEquals(object a, object b) {
+        static object ObjectEquals(object a, object b) {
             if (a == null && b == null) return true;
             if (a == null) return false;
             if (b == null) return false;
             return a.Equals(b);
         }
 
-        private object RunTemplate(object byteArray) {
+        object RunTemplate(object byteArray) {
             var template = _vm.ReadLunulaCode(new BinaryReader(new MemoryStream((byte[])byteArray)));
             return _vm.RunTemplate(template);
         }
 
-        private object LoadLVMFile(object fileName) {
+        object LoadLVMFile(object fileName) {
             return _vm.LoadLVMFile((string)fileName);
         }
     }
@@ -797,11 +645,11 @@ namespace Lunula {
     }
 
     public class Continuation {
-        public Continuation CONT = null;
-        public LexicalEnvironment ENVT = null;
-        public object EVAL_STACK = null;
-        public Template TEMPLATE = null;
-        public uint PC = 0;
+        public Continuation CONT;
+        public LexicalEnvironment ENVT;
+        public object EVAL_STACK;
+        public Template TEMPLATE;
+        public uint PC;
 
         public Continuation(Continuation cont, LexicalEnvironment envt, object evalStack, Template template, uint pc) {
             CONT = cont;
@@ -811,8 +659,6 @@ namespace Lunula {
             PC = pc;
         }
     }
-
-    public class LunulaEndException : Exception { }
 
     public class Instruction {
         public enum OpCodes {
@@ -849,11 +695,7 @@ namespace Lunula {
     }
 
     public class LunulaVM {
-        private Dictionary<Symbol, object> _toplevelEnv = new Dictionary<Symbol, object>();
-
-#if PROFILER
-        public Profiler _profiler;
-#endif
+        readonly Dictionary<Symbol, object> _toplevelEnv = new Dictionary<Symbol, object>();
 
         public bool ToplevelIsDefined(Symbol name) {
             return _toplevelEnv.ContainsKey(name);
@@ -880,67 +722,69 @@ namespace Lunula {
         }
 
         public void DefineFunctionN(string name, Func<object[], object> fun) {
-            Symbol symName = Symbol.Intern(name);
+            var symName = Symbol.Intern(name);
             ToplevelDefine(symName, fun);
         }
 
         public void DefineFunction(string name, Func<object> fun) {
-            Symbol symName = Symbol.Intern(name);
+            var symName = Symbol.Intern(name);
             ToplevelDefine(symName, fun);
         }
 
         public void DefineFunction(string name, Func<object, object> fun) {
-            Symbol symName = Symbol.Intern(name);
+            var symName = Symbol.Intern(name);
             ToplevelDefine(symName, fun);
         }
 
         public void DefineFunction(string name, Func<object, object, object> fun) {
-            Symbol symName = Symbol.Intern(name);
+            var symName = Symbol.Intern(name);
             ToplevelDefine(symName, fun);
         }
 
         public void DefineFunction(string name, Func<object, object, object, object> fun) {
-            Symbol symName = Symbol.Intern(name);
+            var symName = Symbol.Intern(name);
             ToplevelDefine(symName, fun);
         }
 
         public void DefineFunction(string name, Func<object, object, object, object, object> fun) {
-            Symbol symName = Symbol.Intern(name);
+            var symName = Symbol.Intern(name);
             ToplevelDefine(symName, fun);
         }
 
         public object Apply(object fun, params object[] argsList) {
             if (fun is Closure) {
                 return RunClosure((Closure)fun, argsList);
-            } else if (fun is Func<object>) {
-                return ((Func<object>)fun).Invoke();
-            } else if (fun is Func<object, object>) {
-                return ((Func<object, object>)fun).Invoke(argsList[0]);
-            } else if (fun is Func<object, object, object>) {
-                return ((Func<object, object, object>)fun).Invoke(argsList[0], argsList[1]);
-            } else if (fun is Func<object, object, object, object>) {
-                return ((Func<object, object, object, object>)fun).Invoke(argsList[0], argsList[1], argsList[2]);
-            } else if (fun is Func<object, object, object, object, object>) {
-                return ((Func<object, object, object, object, object>)fun).Invoke(argsList[0], argsList[1], argsList[2], argsList[3]);
-            } else if (fun is Func<object[], object>) {
-                return ((Func<object[], object>)fun).Invoke(argsList);
-            } else {
-                throw new InvalidOperationException("Invalid function to apply");
             }
+            if (fun is Func<object>) {
+                return ((Func<object>)fun).Invoke();
+            }
+            if (fun is Func<object, object>) {
+                return ((Func<object, object>)fun).Invoke(argsList[0]);
+            }
+            if (fun is Func<object, object, object>) {
+                return ((Func<object, object, object>)fun).Invoke(argsList[0], argsList[1]);
+            }
+            if (fun is Func<object, object, object, object>) {
+                return ((Func<object, object, object, object>)fun).Invoke(argsList[0], argsList[1], argsList[2]);
+            }
+            if (fun is Func<object, object, object, object, object>) {
+                return ((Func<object, object, object, object, object>)fun).Invoke(argsList[0], argsList[1], argsList[2], argsList[3]);
+            }
+            if (fun is Func<object[], object>) {
+                return ((Func<object[], object>)fun).Invoke(argsList);
+            }
+            throw new InvalidOperationException("Invalid function to apply");
         }
 
         // REGISTERS
-        Continuation CONT = null;
-        LexicalEnvironment ENVT = null;
-        object EVAL_STACK = null;
-        Template TEMPLATE = null;
-        uint PC = 0;
+        Continuation CONT;
+        LexicalEnvironment ENVT;
+        object EVAL_STACK;
+        Template TEMPLATE;
+        uint PC;
         object VALUE = Void.TheVoidValue;
 
-        private LunulaVM() {
-#if PROFILER
-            _profiler = new Profiler(ToplevelEnv);
-#endif
+        LunulaVM() {
             new Builtins(this);
         }
 
@@ -956,22 +800,20 @@ namespace Lunula {
             }
         }
 
-        private void Return() {
+        bool _finished = false;
+        void Return() {
             if (CONT != null) {
-#if PROFILER
-                _profiler.ExitFunction(TEMPLATE, CONT.TEMPLATE);
-#endif
                 ENVT = CONT.ENVT;
                 PC = CONT.PC;
                 TEMPLATE = CONT.TEMPLATE;
                 EVAL_STACK = CONT.EVAL_STACK;
                 CONT = CONT.CONT;
             } else {
-                throw new LunulaEndException();
+                _finished = true;
             }
         }
 
-        private object RunClosure(Closure closure, params object[] args) {
+        object RunClosure(Closure closure, params object[] args) {
             var PREV_CONT = CONT;
             var PREV_ENVT = ENVT;
             var PREV_EVAL_STACK = EVAL_STACK;
@@ -985,9 +827,6 @@ namespace Lunula {
             PC = 0;
             VALUE = Void.TheVoidValue;
 
-#if PROFILER
-            _profiler.EnterFunction(null, TEMPLATE);
-#endif
             try {
                 while (true) {
                     Instruction i = TEMPLATE.Code[PC];
@@ -997,9 +836,9 @@ namespace Lunula {
                             PC++;
                             break;
                         case Instruction.OpCodes.Bind: {
-                                int numOfBindings = (int)i.AX;
+                                var numOfBindings = (int)i.AX;
                                 ENVT = new LexicalEnvironment(ENVT, numOfBindings);
-                                for (int x = 0; x < numOfBindings; x++) {
+                                for (var x = 0; x < numOfBindings; x++) {
                                     ENVT.Bindings[numOfBindings - 1 - x] = Cons.Car(EVAL_STACK);
                                     EVAL_STACK = Cons.Cdr(EVAL_STACK);
                                 }
@@ -1043,7 +882,7 @@ namespace Lunula {
                                 // parameters are reversed on EVAL stack
                                 EVAL_STACK = Cons.Reverse(EVAL_STACK);
 
-                                for (int x = 0; x < numOfBindings; x++) {
+                                for (var x = 0; x < numOfBindings; x++) {
                                     // if it is the last binding, take the rest of the EVAL_STACK
                                     if (x == numOfBindings - 1) {
                                         ENVT.Bindings[x] = EVAL_STACK;
@@ -1071,10 +910,6 @@ namespace Lunula {
                         case Instruction.OpCodes.Apply: {
                                 if (VALUE is Closure) {
                                     var clos = (Closure)VALUE;
-#if PROFILER
-                                    _profiler.EnterFunction(TEMPLATE, clos.Template);
-#endif
-
                                     ENVT = clos.Envt;
                                     TEMPLATE = clos.Template;
                                     VALUE = Void.TheVoidValue;
@@ -1120,13 +955,16 @@ namespace Lunula {
                             PC = i.AX;
                             break;
                         case Instruction.OpCodes.End:
-                            throw new LunulaEndException();
+                            _finished = true;
+                            break;
                         default:
                             throw new InvalidOperationException("Invalid instruction");
                     }
+                    if (_finished) {
+                        _finished = false;
+                        return VALUE;
+                    }
                 }
-            } catch (LunulaEndException) {
-                return VALUE;
             } finally {
                 CONT = PREV_CONT;
                 ENVT = PREV_ENVT;
@@ -1140,33 +978,31 @@ namespace Lunula {
             return RunClosure(new Closure(null, template));
         }
 
-        private int ReadHeader(BinaryReader br) {
+        static int ReadHeader(BinaryReader br) {
             // The header of a compile lunula file starts with
             // the chars LUNULA followed by a 16-bit version number
-            foreach (var c in "LUNULA") {
-                char ch = (char)br.ReadUInt16();
-                if (ch != c) throw new InvalidOperationException("Invalid Lunula data stream");
+            if ((from c in "LUNULA" let ch = (char)br.ReadUInt16() where ch != c select c).Any()) {
+                throw new InvalidOperationException("Invalid Lunula data stream");
             }
             return br.ReadUInt16();
         }
 
-        private string ReadString(BinaryReader br) {
+        static string ReadString(BinaryReader br) {
             int length = br.ReadUInt16();
-            char[] chars = new char[length];
+            var chars = new char[length];
             for (int i = 0; i < length; i++) {
                 chars[i] = (char)br.ReadInt16();
             }
             return new String(chars);
         }
 
-        private Template ReadTemplate(BinaryReader br) {
-
-            int version = br.ReadInt32();
+        static Template ReadTemplate(BinaryReader br) {
+            var version = br.ReadInt32();
             Debug.Assert(version == 3);
-            int numberOfLiterals = br.ReadInt32();
-            int numberOfInstructions = br.ReadInt32();
-            object[] literals = new object[numberOfLiterals];
-            Instruction[] instructions = new Instruction[numberOfInstructions];
+            var numberOfLiterals = br.ReadInt32();
+            var numberOfInstructions = br.ReadInt32();
+            var literals = new object[numberOfLiterals];
+            var instructions = new Instruction[numberOfInstructions];
             for (int x = 0; x < numberOfLiterals; x++) {
                 byte type = br.ReadByte();
                 switch (type) {
@@ -1207,7 +1043,7 @@ namespace Lunula {
                 instructions[x] = new Instruction(br.ReadUInt32());
             }
 
-            Template template = new Template(literals, instructions);
+            var template = new Template(literals, instructions);
             return template;
         }
 
@@ -1218,7 +1054,7 @@ namespace Lunula {
         }
 
         public object LoadLVMFromStream(Stream s) {
-            Template template = null;
+            Template template;
             using (var br = new BinaryReader(s)) {
                 template = ReadLunulaCode(br);
             }

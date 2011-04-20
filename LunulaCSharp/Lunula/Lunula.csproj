@@ -67,11 +67,6 @@
       <Link>lunula.lvm</Link>
     </EmbeddedResource>
   </ItemGroup>
-  <ItemGroup>
-    <Content Include="start.lun">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.
