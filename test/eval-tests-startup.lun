@@ -14,4 +14,5 @@
   (display "Eval-ing Unit Tests..." (current-error-port))
   (newline (current-error-port))
   (include "../test/test.lun")
-  (quit))
+  (quit)
+)

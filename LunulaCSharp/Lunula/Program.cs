@@ -1,14 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Reflection;
-using System.Windows.Forms;
-using Lunula;
-using System.IO;
-using System.Diagnostics;
+﻿using System.Reflection;
 
-namespace LunulaCSharp {
+namespace Lunula {
     public class Program {
         static void Main(string[] args) {
             LunulaVM vm;
