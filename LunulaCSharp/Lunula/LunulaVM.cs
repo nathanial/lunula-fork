@@ -390,7 +390,8 @@ namespace Lunula {
 
         public object CallWithCurrentContinuation(object fun) {
             var cont = new Continuation(_cont, _envt, _evalStack, _template, _pc);
-            object retval = Apply(fun, new Func<object, object>(r => {
+			object retval = null;
+            retval = Apply(fun, new Func<object, object>(r => {
                 _cont = cont.CONT;
                 _envt = cont.ENVT;
                 _evalStack = cont.EVAL_STACK;

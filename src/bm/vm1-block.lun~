@@ -1,0 +1,12 @@
+(define (m f)
+  (f))
+
+(define (run)
+  (define (loop i fun)
+    (if (= i 0)
+	0
+	(begin
+	  (fun)
+	  (loop (- i 1) fun)))))
+	    
+	

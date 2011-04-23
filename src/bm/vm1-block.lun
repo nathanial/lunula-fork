@@ -1,0 +1,14 @@
+(define (m f)
+  (f))
+
+(define (run)
+  (define (loop i fun)
+    (if (= i 0)
+	0
+	(begin
+	  (fun)
+	  (loop (- i 1) fun))))
+  (loop 30000000 (lambda () (+ 1 2))))
+
+(print (run))
+(newline)

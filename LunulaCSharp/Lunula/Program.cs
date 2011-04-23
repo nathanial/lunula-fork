@@ -12,9 +12,7 @@ namespace Lunula {
                 foreach (var arg in args) {
                     vm.Load(arg);
                 }
-            } else {
-                vm.Eval("(repl)");
-            }
+            } 
         }
     }
 }
